@@ -1,0 +1,54 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- 测试与缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- 打包产物 ----
+*.spec.bak
+build_report.txt
+
+# ---- 本地数据 / 模型（大文件不入库） ----
+data/
+models/
+*.onnx
+*.pth
+*.pdmodel
+*.pdiparams
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+*.swp
+*~
+Thumbs.db
+desktop.ini

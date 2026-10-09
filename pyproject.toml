@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fanyi"
+version = "0.1.0"
+description = "截图识别文本并翻译的 Windows 桌面工具（多语言互译）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "翻译" }]
+keywords = ["screenshot", "ocr", "translate", "pyside6", "windows"]
+
+dependencies = [
+    "PySide6>=6.6,<6.10",
+    "requests>=2.31",
+    # 本地离线 OCR（ONNX Runtime，自带中简/中繁/英文模型）
+    "rapidocr-onnxruntime>=1.3.24",
+    "onnxruntime>=1.17",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.8",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pyinstaller>=6.6",
+]
+
+[project.scripts]
+fanyi = "fanyi.app:main"
+
+[project.gui-scripts]
+fanyi-gui = "fanyi.app:main"
+
+[tool.setuptools]
+packages = ["fanyi", "fanyi.core", "fanyi.ui"]
+
+[tool.setuptools.package-data]
+fanyi = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
