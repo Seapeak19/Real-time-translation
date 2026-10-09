@@ -1,0 +1,14 @@
+# 统一换行符：仓库内存 LF，Windows 检出也用 LF，
+# 避免每次改动都出现 "LF will be replaced by CRLF" 的整文件噪声 diff。
+* text=auto eol=lf
+
+# Windows 批处理必须用 CRLF，否则某些 cmd 解析会出问题
+*.bat text eol=crlf
+
+# 二进制文件不做换行转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.onnx binary
+*.exe binary
+*.dll binary
