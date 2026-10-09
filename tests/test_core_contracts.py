@@ -340,6 +340,19 @@ def test_rapidocr_parse_variants():
     assert lines[0].confidence == 1.0
 
 
+def test_rapidocr_parse_normalizes_cjk_spacing():
+    """回归：归一化必须在解析阶段完成，否则 lines[].text 与 OcrResult.text 不一致。"""
+    from fanyi.core.ocr import RapidOcrEngine
+
+    box = [[0, 0], [10, 0], [10, 10], [0, 10]]
+    lines = RapidOcrEngine._parse([[box, "截图翻译工具v0.1.0", 0.99]], 10, 10)
+    assert lines[0].text == "截图翻译工具 v0.1.0"
+
+    result = OcrResult(lines=lines)
+    assert result.text == "截图翻译工具 v0.1.0"
+    assert result.raw_text == result.text
+
+
 # ---------------------------------------------------------------------------
 # numpy 参与的类型约束（保证 recognize 接口拿到的是数组）
 # ---------------------------------------------------------------------------

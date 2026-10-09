@@ -11,20 +11,31 @@ from fanyi import languages as L
 # 分行拼接
 # ---------------------------------------------------------------------------
 class TestJoinLines:
-    def test_cjk_lines_are_concatenated_without_space(self):
-        assert L.join_lines(["你好，", "世界"], "zh-Hans") == "你好，世界"
+    def test_separate_lines_keep_newline(self):
+        # 换行代表原文分行，是天然分句点，必须保留
+        assert L.join_lines(["你好，", "世界"], "zh-Hans") == "你好，\n世界"
 
-    def test_cjk_auto_detected(self):
-        assert L.join_lines(["截图", "翻译工具"], "auto") == "截图翻译工具"
+    def test_cjk_line_then_latin_line_keeps_newline(self):
+        # 回归：曾经把中文行直接相连，导致中文行尾与下一行英文粘连成 "工具v0.1.0英文…"
+        joined = L.join_lines(["截图翻译工具", "Screenshot translator"], "zh-Hans")
+        assert joined == "截图翻译工具\nScreenshot translator"
 
-    def test_latin_lines_joined_with_space(self):
-        assert L.join_lines(["Hello", "world"], "en") == "Hello world"
+    def test_ascii_ending_cjk_line_gets_space_before_latin(self):
+        # 上一行以 ASCII 字母数字结尾、下一行也以 ASCII 开头 → 直接换行会粘连，改补空格
+        joined = L.join_lines(["截图翻译工具 v0.1.0", "Screenshot translator"], "zh-Hans")
+        assert joined == "截图翻译工具 v0.1.0 Screenshot translator"
+        assert "0Screenshot" not in joined
+
+    def test_adjacent_ascii_lines_joined_with_space(self):
+        # 两行首尾都是字母数字，直接换行会粘连成 worldScreenshot
+        assert L.join_lines(["Hello world", "Screenshot tool"], "en") == "Hello world Screenshot tool"
 
     def test_latin_hyphen_wrapped_word(self):
         assert L.join_lines(["trans-", "lation"], "en") == "translation"
 
-    def test_latin_sentence_end_keeps_newline(self):
-        assert L.join_lines(["Done.", "Next step"], "en") == "Done.\nNext step"
+    def test_chinese_hyphen_not_merged(self):
+        # 中文里的连字符是内容，不能当成英文断词
+        assert L.join_lines(["一二—", "三四"], "zh-Hans") == "一二—\n三四"
 
     def test_blank_lines_ignored(self):
         assert L.join_lines(["  ", "abc", "", "  def "], "en") == "abc def"
@@ -33,6 +44,12 @@ class TestJoinLines:
         assert L.join_lines([], "en") == ""
         assert L.join_lines(["", "   "], "zh-Hans") == ""
 
+    def test_single_line_unchanged(self):
+        assert L.join_lines(["就一行"], "zh-Hans") == "就一行"
+
+    def test_mixed_script_boundary_no_space_needed(self):
+        # 中文行尾接英文行首不会粘连（字符类型不同），保留换行即可
+        assert L.join_lines(["这是中文", "English line"], "zh-Hans") == "这是中文\nEnglish line"
 
 # ---------------------------------------------------------------------------
 # 语言代码归一化

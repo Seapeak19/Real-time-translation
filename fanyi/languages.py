@@ -214,26 +214,30 @@ _SENTENCE_END = "。！？；.!?;:：）)」』】"
 def join_lines(lines: List[str], source_lang: str = AUTO) -> str:
     """把 OCR 得到的多行文本拼成一段便于翻译的文本。
 
-    - 中文/日文等 CJK 文本：直接相接，不插空格（避免"翻 译 软 件"式噪声）
-    - 拉丁文本：行尾为连字符时去连字符续接，句子未结束则补空格，否则保留换行
+    **换行是有意义的信息**：它代表原文的版面分行，也是天然的分句点。
+    早期版本把中文行直接相连（``"".join``），结果是"截图翻译工具"和
+    紧随其后的英文行粘成 ``截图翻译工具v0.1.0Screenshot translator…``，
+    译文跟着乱掉。因此这里一律保留换行，只做两件事：
+
+    1. 行尾是连字符时去掉连字符续接（``trans-`` + ``lation`` → ``translation``）；
+    2. 相邻两行首尾都是字母/数字时，把换行换成空格，
+       避免跨行粘连成 ``worldScreenshot`` 这种毁掉分词的错误。
     """
     cleaned = [ln.strip() for ln in lines]
     cleaned = [ln for ln in cleaned if ln]
     if not cleaned:
         return ""
 
-    cjk_mode = info(source_lang).cjk if source_lang != AUTO else has_cjk("".join(cleaned))
-    if cjk_mode:
-        return "".join(cleaned)
-
     out = cleaned[0]
     for line in cleaned[1:]:
-        if out.endswith("-"):
+        if out.endswith("-") and len(out) > 1 and out[-2].isascii():
+            # 英文单词被换行拆开
             out = out[:-1] + line
-        elif out and out[-1] in _SENTENCE_END:
-            out = out + "\n" + line
-        else:
+        elif out[-1].isascii() and out[-1].isalnum() and line[0].isascii() and line[0].isalnum():
+            # 两行首尾都是 ASCII 字母数字，直接换行会粘连，改用空格
             out = out + " " + line
+        else:
+            out = out + "\n" + line
     return out
 
 

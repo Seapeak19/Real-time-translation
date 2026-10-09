@@ -34,12 +34,19 @@ htmlcov/
 .tox/
 
 # ---- 打包产物 ----
+dist/
+dist-debug/
+build/
+build-debug/
 *.spec.bak
 build_report.txt
 
 # ---- 本地数据 / 模型（大文件不入库） ----
 data/
 models/
+# testdata 只保留目录占位，截图/缓存在本地生成
+testdata/*
+!testdata/.gitkeep
 *.onnx
 *.pth
 *.pdmodel

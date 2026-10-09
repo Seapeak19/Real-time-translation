@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
 from ..config import Config
+from ..languages import join_lines
 from .base import NoEngineAvailable
 from .ocr import OcrEngine, OcrError, OcrResult, TextLine, create_engine
 from .translate import ENGINE_LABELS as TRANSLATE_LABELS
@@ -112,8 +113,7 @@ class TranslationPipeline:
         started = time.perf_counter()
 
         ocr_result = self.recognize(image, on_progress)
-        lines = [l.text for l in ocr_result.lines]
-        source_text = _join_lines(lines, self.config.source_lang)
+        source_text = join_lines([l.text for l in ocr_result.lines], self.config.source_lang)
 
         if not source_text.strip():
             raise PipelineError("未识别到文字，请框选包含清晰文字的区域后重试")
@@ -168,25 +168,8 @@ class TranslationPipeline:
 
 
 def _join_lines(lines: List[str], source_lang: str) -> str:
-    """按语言习惯拼接 OCR 的多行文本。"""
-    from ..languages import AUTO, has_cjk, info
-
-    cleaned = [ln.strip() for ln in lines if ln and ln.strip()]
-    if not cleaned:
-        return ""
-    cjk = info(source_lang).cjk if source_lang != AUTO else has_cjk("".join(cleaned))
-    if cjk:
-        return "".join(cleaned)
-
-    out = cleaned[0]
-    for line in cleaned[1:]:
-        if out.endswith("-"):
-            out = out[:-1] + line
-        elif out and out[-1] in "。！？；.!?;:：）)」』】":
-            out = out + "\n" + line
-        else:
-            out = out + " " + line
-    return out
+    """兼容旧调用点：真正的实现在 :func:`fanyi.languages.join_lines`。"""
+    return join_lines(lines, source_lang)
 
 
 __all__ = ["PipelineError", "PipelineResult", "TranslationPipeline"]

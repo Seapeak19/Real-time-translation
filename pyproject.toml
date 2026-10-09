@@ -8,10 +8,20 @@ version = "0.1.0"
 description = "截图识别文本并翻译的 Windows 桌面工具（多语言互译）"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 authors = [{ name = "翻译" }]
 keywords = ["screenshot", "ocr", "translate", "pyside6", "windows"]
+classifiers = [
+    "Environment :: Win32 (MS Windows)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Text Processing :: Linguistic",
+]
 
+# 与 requirements.txt 保持一致；两者都是"运行期依赖"的唯一事实来源，
+# 改动其一时请同步另一个。
 dependencies = [
     "PySide6>=6.6,<6.10",
     "requests>=2.31",
@@ -21,6 +31,10 @@ dependencies = [
     "numpy>=1.24",
     "opencv-python-headless>=4.8",
     "Pillow>=10.0",
+    # 简繁字形转换
+    "opencc-python-reimplemented>=0.1.7",
+    # 全局热键
+    "keyboard>=0.13.5",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +53,8 @@ fanyi-gui = "fanyi.app:main"
 packages = ["fanyi", "fanyi.core", "fanyi.ui"]
 
 [tool.setuptools.package-data]
+# 图标等资源放在仓库根的 assets/，打包时由 翻译.spec 负责收集；
+# 这里保留声明，便于将来把资源移进包内。
 fanyi = ["assets/*"]
 
 [tool.pytest.ini_options]

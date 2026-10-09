@@ -22,7 +22,7 @@ from ..core.pipeline import PipelineError, TranslationPipeline
 from ..core.translate import TranslationService
 from ..hotkey import GlobalHotkeyManager
 from ..languages import label as lang_label
-from ..overlay import OverlayManager, Selection
+from ..overlay import OverlayManager, Selection, nudge_to_foreground
 from ..screenshot import Capture, crop, grab_virtual_desktop, to_numpy
 from .history import HistoryEntry, HistoryStore
 from .history_panel import HistoryPanel
@@ -150,6 +150,7 @@ class AppController(QObject):
             capture,
             on_selected=lambda selection: self._on_region_selected(selection),
             on_cancelled=self._on_capture_cancelled,
+            nudge_foreground=True,
         )
         if not started:
             self.overlay.close()
@@ -211,6 +212,7 @@ class AppController(QObject):
         else:
             self.result_window.move_to_corner()
         self.result_window.reveal()
+        nudge_to_foreground()  # 后台进程抢焦点需要额外一步，否则按键不响应
 
         def task() -> object:
             return self.pipeline.run(

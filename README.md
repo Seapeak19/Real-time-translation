@@ -23,6 +23,7 @@
 | 置顶结果窗 | 原文/译文对照、一键复制、切换目标语言后自动重译、可拖动可调大小 |
 | 托盘常驻 | 托盘菜单切换语言、查看历史、清空缓存、修改设置 |
 | 翻译历史 | 自动记录最近若干条翻译，可搜索查看、复制、重译 |
+| 免安装分发 | 提供 PyInstaller 打包配置，产出独立目录，目标机器无需装 Python |
 
 ### 翻译后端实测（国内网络）
 
@@ -34,6 +35,19 @@
 | MyMemory | 1 ~ 3s | 免费额度制，较稳定，第二顺位 |
 | Bing 翻译 | 1 ~ 3s | 需先取会话令牌，第三顺位 |
 | Google 免费端点 | 视网络 | 国内常被阻断，能直连时质量最好 |
+
+---
+
+## 两种使用方式
+
+### 方式一：直接运行打包好的程序（推荐给最终用户）
+
+进入 `dist\翻译\`，双击 **`翻译.exe`**。整个目录约 335 MB，可以拷到任何 Windows 机器上运行，
+**不需要安装 Python**。目录结构必须保持完整（`翻译.exe` 与 `_internal\` 同级）。
+
+### 方式二：从源码运行（推荐给要改代码的人）
+
+见下面的「安装」。
 
 ---
 
@@ -67,15 +81,39 @@ python scripts\bootstrap_dev.py
 
 ## 验证工具
 
-改动之后想确认没坏，按下面顺序跑一遍即可（都不是单元测试，而是真的调用系统能力）：
+改动之后想确认没坏，按下面顺序跑一遍即可（都不是单纯的单元测试，而是真的调用系统能力）：
 
 | 命令 | 作用 |
 |---|---|
-| `.venv\Scripts\python.exe scripts\selfcheck.py` | 环境自检：依赖、OCR、翻译、截图、热键、端到端 |
 | `.venv\Scripts\python.exe -m pytest` | 单元测试（纯逻辑，不联网、不弹窗） |
+| `.venv\Scripts\python.exe scripts\selfcheck.py` | 环境自检：依赖、OCR、翻译、截图、热键、端到端 |
 | `.venv\Scripts\python.exe scripts\gui_smoketest.py` | 界面冒烟：托盘、结果窗、设置、历史、框选覆盖层、后台线程、真实 OCR+翻译 |
 | `.venv\Scripts\python.exe scripts\launch_check.py` | 真的启动一次主程序，确认常驻、单实例、热键注册与日志 |
+| `.venv\Scripts\python.exe scripts\verify_package.py` | 真的启动打包后的 exe，确认它在没有 Python 的环境里也能跑 |
 | `.venv\Scripts\python.exe scripts\probe_engines.py` | 逐个探测翻译后端在你的网络下的连通性与时延 |
+
+---
+
+## 打包成免安装程序
+
+```powershell
+# 1) 装打包工具（一次性）
+.venv\Scripts\python.exe -m pip install pyinstaller -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 2) 生成程序图标（可选，改图标时用）
+.venv\Scripts\python.exe scripts\make_icon.py
+
+# 3) 打包
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean 翻译.spec
+
+# 4) 验证产物真的能跑（会启动 exe 并检查日志）
+.venv\Scripts\python.exe scripts\verify_package.py
+```
+
+产物：`dist\翻译\翻译.exe` + `dist\翻译\_internal\`，整体约 335 MB（Qt 与 ONNX Runtime 占大头）。
+
+打包排错：若 exe 一闪而过，用保留控制台的 `翻译-debug.spec` 重新打包，
+它会把崩溃堆栈直接打在窗口里（`--distpath dist-debug --workpath build-debug`）。
 
 ---
 

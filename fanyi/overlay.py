@@ -11,6 +11,10 @@
 
 from __future__ import annotations
 
+import ctypes
+import logging
+import sys
+from ctypes import wintypes
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -25,9 +29,11 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
 )
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from .screenshot import Capture
+
+logger = logging.getLogger(__name__)
 
 #: 选区小于该尺寸（物理像素）视为误触
 MIN_SELECTION = 8
@@ -349,6 +355,90 @@ class SelectionOverlay(QWidget):
         painter.drawText(QRect(x, y, width, height), Qt.AlignmentFlag.AlignCenter, text)
 
 
+def nudge_to_foreground() -> bool:
+    """把当前进程提到前台（Windows）。
+
+    为什么需要它：Windows 默认禁止后台进程调用 ``SetForegroundWindow``，
+    托盘常驻程序因此经常出现"窗口弹出来了但焦点还在别的程序上"，
+    结果用户按 ESC、打字都不响应。触发源是全局热键时，
+    系统刚把输入交给我们，这时调用是被允许的。
+
+    做法是经典技巧：临时把当前前台窗口所在线程的输入队列挂到自己线程上，
+    借此取得前台权限，再摘掉挂接。找不到前台窗口时退化为 Qt 层面的激活。
+    """
+    if sys.platform != "win32":
+        return _qt_activate()
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.c_void_p]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+        kernel32.GetCurrentProcessId.restype = wintypes.DWORD
+        user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.BringWindowToTop.argtypes = [wintypes.HWND]
+        user32.IsWindow.argtypes = [wintypes.HWND]
+
+        # 找本进程自己的一个可见顶层窗口作为提升目标
+        hwnd = _own_top_level_hwnd(user32, kernel32)
+        if not hwnd:
+            return _qt_activate()
+
+        foreground = user32.GetForegroundWindow()
+        current_thread = kernel32.GetCurrentThreadId()
+        target_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+
+        attached = False
+        try:
+            if target_thread and target_thread != current_thread:
+                attached = bool(user32.AttachThreadInput(target_thread, current_thread, True))
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                user32.AttachThreadInput(target_thread, current_thread, False)
+        return True
+    except Exception as exc:  # pragma: no cover - 平台相关
+        logger.debug("前台提升失败，退回 Qt 激活: %s", exc)
+        return _qt_activate()
+
+
+def _own_top_level_hwnd(user32, kernel32):
+    """返回本进程第一个可见的顶层窗口句柄，没有则返回 0。"""
+    pid = kernel32.GetCurrentProcessId()
+    found = []
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+    )
+
+    def callback(hwnd, _lparam):
+        owner_pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner_pid))
+        if owner_pid.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+            return False  # 找到一个就够
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return found[0] if found else 0
+
+
+def _qt_activate() -> bool:
+    """非 Windows 或取不到句柄时，用 Qt 自身的方式激活。"""
+    try:
+        for widget in QApplication.topLevelWidgets():
+            if widget.isVisible():
+                widget.raise_()
+                widget.activateWindow()
+        return True
+    except Exception:
+        return False
+
+
 class OverlayManager:
     """在所有显示器上同时铺开覆盖层，任一处框选都算数。"""
 
@@ -364,8 +454,14 @@ class OverlayManager:
         capture: Capture,
         on_selected,
         on_cancelled,
+        nudge_foreground: bool = False,
     ) -> bool:
-        """开始框选。返回是否成功铺开覆盖层。"""
+        """开始框选。返回是否成功铺开覆盖层。
+
+        :param nudge_foreground: 是否调用 Win32 把本进程提到前台。
+            由全局热键触发时应当为 ``True``：Windows 会拦截后台进程的
+            ``SetForegroundWindow``，而热键线程刚被系统唤醒，此时调用才有效。
+        """
         self.close()
         screens = QGuiApplication.screens()
         if not screens:
@@ -388,6 +484,9 @@ class OverlayManager:
 
         for overlay in self._overlays:
             overlay.show()
+
+        if nudge_foreground:
+            nudge_to_foreground()
         return True
 
     def close(self) -> None:
@@ -410,4 +509,5 @@ __all__ = [
     "SelectionOverlay",
     "clamp_rect",
     "normalize_rect",
+    "nudge_to_foreground",
 ]

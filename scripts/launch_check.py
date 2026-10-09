@@ -21,11 +21,19 @@ LOG = APP_HOME / "fanyi.log"
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 
 
-def read_new_log(offset: int) -> tuple:
+def count_lines() -> int:
+    """当前日志行数（用行数而不是字节偏移做基准，避免把行切成两半）。"""
     if not LOG.exists():
-        return "", offset
-    data = LOG.read_text(encoding="utf-8", errors="replace")
-    return data[offset:], len(data)
+        return 0
+    return len(LOG.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def read_new_log(start_line: int) -> str:
+    """读取第 start_line 行之后的新日志（完整行）。"""
+    if not LOG.exists():
+        return ""
+    lines = LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+    return "\n".join(lines[start_line:])
 
 
 def main() -> int:
@@ -33,7 +41,7 @@ def main() -> int:
         print(f"没有找到虚拟环境解释器: {PYTHON}")
         return 2
 
-    before = LOG.stat().st_size if LOG.exists() else 0
+    before = count_lines()
     # 清掉单实例残留（上一次异常退出可能留下管道）
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
@@ -69,7 +77,7 @@ def main() -> int:
         print(f"  第二次启动返回码 {second.returncode}，输出: {second_output or '(无)'}")
 
         time.sleep(1.5)
-        new_log, _ = read_new_log(before)
+        new_log = read_new_log(before)
     finally:
         if process.poll() is None:
             process.terminate()

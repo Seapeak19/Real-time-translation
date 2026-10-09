@@ -59,11 +59,13 @@ class OcrResult:
     def text(self) -> str:
         """按版面顺序整理出的完整文本。
 
-        同一行内的多个文本框用换行连接会破坏句子（英文尤其明显），
-        因此这里先把文本框按行分组，再决定行内如何拼接：
+        同一个逻辑行可能被 OCR 切成多个文本框，直接换行连接会破坏句子
+        （中文被拆成"翻 / 译"、英文被拆成两个词），因此这里先按行分组，
+        再决定行内如何拼接：
 
-        * 行内含有中日韩文字 → 直接相连（避免"翻 译 软 件"式噪声）
-        * 纯拉丁文本 → 用空格相连，补回行框之间的词间空格
+        * 行内含有中日韩文字 → 直接相连（避免"翻 译 软 件"式噪声），
+          相接之后再跑一次中英空格归一化，处理"中文框 + 英文框"这种混排
+        * 纯拉丁文本 → 用空格相连，补回行框之间被吞掉的词间空格
         """
         groups = _group_lines(self.lines)
         if not groups:
@@ -236,6 +238,10 @@ class RapidOcrEngine(OcrEngine):
             text = str(text).strip()
             if not text:
                 continue
+            # 在这里就补回中英之间的空格，而不是只在 OcrResult.text 里补：
+            # 管线用的是 lines[].text，如果两种取法结果不一致，
+            # 就会出现"界面上有空格、送进翻译的却没有"这种难查的不一致。
+            text = normalize_cjk_spacing(text)
             coords: Optional[List[List[float]]] = None
             try:
                 coords = [[float(p[0]), float(p[1])] for p in box]
