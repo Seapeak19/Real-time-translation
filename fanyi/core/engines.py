@@ -324,16 +324,26 @@ def _mymemory_code(code: str, target: str) -> str:
 # 3. Bing 翻译（需先取会话令牌）
 # ---------------------------------------------------------------------------
 class BingTranslator(Translator):
-    """``cn.bing.com/translator`` 的网页接口。
+    """Bing 翻译网页接口（先取会话令牌，再调 ``ttranslatev3``）。
 
-    需要先抓一次页面拿到 ``IG``/``IID`` 令牌，令牌有有效期，
+    需要先抓一次页面拿到 ``IG``/``IID``/令牌，令牌有有效期，
     过期或结构变化时自动重取一次；仍失败则抛出异常交给下一个后端。
+
+    **域名很重要**：实测 ``cn.bing.com`` 会对请求返回 HTTP 200 但**空内容**
+    （反爬收紧），而 ``www.bing.com`` 同一套令牌流程能正常返回 JSON，
+    且译文质量明显更好（响应里带 ``usedLLM: true``，用的是大模型翻译）。
+    因此这里按 ``www`` → ``cn`` 顺序尝试，任一可用即停。
     """
 
     name = "bing"
     display_name = "Bing 翻译"
-    page_url = "https://cn.bing.com/translator"
-    api_url = "https://cn.bing.com/ttranslatev3"
+
+    #: 依次尝试的 (页面地址, 接口地址)。顺序有意义：先用实测可用的那个。
+    ENDPOINTS = (
+        ("https://www.bing.com/translator", "https://www.bing.com/ttranslatev3"),
+        ("https://cn.bing.com/translator", "https://cn.bing.com/ttranslatev3"),
+    )
+
     chunk_size = 900
     ig_re = re.compile(r'IG:"([^"]+)"')
     iid_re = re.compile(r'data-iid="([^"]+)"')
@@ -343,34 +353,62 @@ class BingTranslator(Translator):
         self.client = client
         self.timeout = timeout
         self._token: Optional[Dict[str, Any]] = None
+        #: 上一次成功的域名下标，下次优先用它，避免每次都从头试
+        self._endpoint_index = 0
+
+    # ------------------------------------------------------------------
+    @property
+    def page_url(self) -> str:
+        return self.ENDPOINTS[self._endpoint_index][0]
+
+    @property
+    def api_url(self) -> str:
+        return self.ENDPOINTS[self._endpoint_index][1]
 
     # ------------------------------------------------------------------
     def _ensure_token(self, force: bool = False) -> Dict[str, Any]:
         if self._token and not force:
             return self._token
 
-        resp = self.client.get(self.page_url, timeout=self.timeout)
-        body = resp.text
+        last_error: Optional[Exception] = None
+        # 从上次成功的域名开始，绕一圈把所有域名都试一遍
+        order = [
+            (self._endpoint_index + offset) % len(self.ENDPOINTS)
+            for offset in range(len(self.ENDPOINTS))
+        ]
+        for index in order:
+            page_url = self.ENDPOINTS[index][0]
+            try:
+                resp = self.client.get(page_url, timeout=self.timeout)
+            except Exception as exc:
+                last_error = exc
+                continue
 
-        ig = self.ig_re.search(body)
-        iid = self.iid_re.search(body)
-        abuse = self.abuse_re.search(body)
-        if not ig or not abuse:
-            raise EngineError("无法从 Bing 页面提取会话令牌（页面结构可能已变更）")
+            body = resp.text
+            ig = self.ig_re.search(body)
+            iid = self.iid_re.search(body)
+            abuse = self.abuse_re.search(body)
+            if not (ig and abuse):
+                last_error = EngineError(f"{page_url} 页面里找不到会话令牌")
+                continue
 
-        try:
-            key, token, interval = json.loads(abuse.group(1))
-        except (ValueError, TypeError) as exc:
-            raise EngineError(f"Bing 令牌解析失败: {exc}") from exc
+            try:
+                key, token, interval = json.loads(abuse.group(1))
+            except (ValueError, TypeError) as exc:
+                last_error = EngineError(f"Bing 令牌解析失败: {exc}")
+                continue
 
-        self._token = {
-            "ig": ig.group(1),
-            "iid": iid.group(1) if iid else "translator.5028",
-            "key": key,
-            "token": token,
-            "interval": int(interval),
-        }
-        return self._token
+            self._endpoint_index = index
+            self._token = {
+                "ig": ig.group(1),
+                "iid": iid.group(1) if iid else "translator.5028",
+                "key": key,
+                "token": token,
+                "interval": int(interval),
+            }
+            return self._token
+
+        raise last_error or EngineError("无法从 Bing 页面提取会话令牌")
 
     # ------------------------------------------------------------------
     def translate(self, text: str, source: str, target: str) -> TranslateResult:
@@ -387,20 +425,9 @@ class BingTranslator(Translator):
         detected = source
         for chunk in split_text(text, self.chunk_size, hard_limit=self.chunk_size):
             payload = self._request_chunk(chunk, src_code, tgt_code)
-            data = payload.get("data") if isinstance(payload, dict) else None
-            if isinstance(data, list):
-                data = data[0] if data else None
-            if not isinstance(data, dict):
-                raise EngineError(f"Bing 返回结构异常: {str(payload)[:120]}")
-            det = data.get("detectedLanguage") or {}
-            if isinstance(det, dict) and det.get("language"):
-                detected = _bing_from_code(str(det["language"]))
-            translations = data.get("translations") or []
-            piece = ""
-            if translations and isinstance(translations[0], dict):
-                piece = str(translations[0].get("text") or "")
-            if not piece:
-                raise EngineError("Bing 返回内容为空")
+            piece, lang = self._parse_translation(payload)
+            if lang:
+                detected = lang
             parts.append(piece)
 
         return TranslateResult(
@@ -409,6 +436,42 @@ class BingTranslator(Translator):
             source_lang=detected,
             target_lang=target,
         )
+
+    @staticmethod
+    def _parse_translation(payload: Any) -> tuple:
+        """解析 ttranslatev3 的返回，兼容几种实测见过的形状。
+
+        两个域名返回的结构不一样，混用会误判成"结构异常"（译文其实就在里面）：
+
+        * ``www.bing.com`` → ``[{"translations": [...], "detectedLanguage": {...}}]``
+          顶层是**数组**，元素直接带 ``translations``
+        * ``cn.bing.com``  → ``{"data": {"translations": [...]}}``
+          顶层是对象，译文在 ``data`` 里
+
+        返回 ``(译文, 检测到的语言代码或空串)``。
+        """
+        if isinstance(payload, list):
+            payload = payload[0] if payload else None
+        elif isinstance(payload, dict) and "translations" not in payload:
+            payload = payload.get("data")
+
+        if isinstance(payload, list):
+            payload = payload[0] if payload else None
+        if not isinstance(payload, dict):
+            raise EngineError(f"Bing 返回结构异常: {str(payload)[:120]}")
+
+        piece = ""
+        translations = payload.get("translations") or []
+        if translations and isinstance(translations[0], dict):
+            piece = str(translations[0].get("text") or "")
+        if not piece:
+            raise EngineError("Bing 返回内容为空")
+
+        detected = ""
+        info = payload.get("detectedLanguage") or {}
+        if isinstance(info, dict) and info.get("language"):
+            detected = _bing_from_code(str(info["language"]))
+        return piece, detected
 
     def _request_chunk(self, chunk: str, src_code: str, tgt_code: str) -> Dict[str, Any]:
         """发一次请求；令牌失效或返回不可解析时重取令牌并重试一次。"""
@@ -438,7 +501,10 @@ class BingTranslator(Translator):
             except EngineError as exc:
                 last_error = exc
             else:
-                if isinstance(payload.get("data"), (dict, list)):
+                # 只在这里判"拿到译文了没有"，具体形状交给 _parse_translation：
+                # www.bing.com 返回顶层数组，cn.bing.com 返回 {"data": {...}}，
+                # 在这里写死形状会把可用域名误判成失败（实测踩过这个坑）。
+                if _bing_has_translation(payload):
                     return payload
                 last_error = EngineError(f"Bing 返回结构异常: {str(payload)[:120]}")
 
@@ -493,6 +559,25 @@ def _bing_from_code(code: str) -> str:
     if key.startswith("en"):
         return EN
     return key
+
+
+def _bing_has_translation(payload: Any) -> bool:
+    """判断这份返回里到底有没有译文。
+
+    两个域名的形状不同，因此这里做形状无关的判断：
+    顶层可能是数组，也可能是 ``{"data": ...}``，译文对象的 ``translations``
+    键则在最外层或 ``data`` 里。
+    """
+    if isinstance(payload, list):
+        payload = payload[0] if payload else None
+    if not isinstance(payload, dict):
+        return False
+    if "translations" in payload:
+        return True
+    inner = payload.get("data")
+    if isinstance(inner, list):
+        inner = inner[0] if inner else None
+    return isinstance(inner, dict) and "translations" in inner
 
 
 __all__ = ["GoogleTranslator", "MyMemoryTranslator", "BingTranslator"]

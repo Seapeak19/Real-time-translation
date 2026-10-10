@@ -41,6 +41,13 @@ build-debug/
 *.spec.bak
 build_report.txt
 
+# ---- 个人笔记 / 草稿（不进版本库） ----
+# 例如给作者自己看的后续规划、体验记录
+后续更新报告.md
+*报告.md
+*笔记.md
+TODO-*.md
+
 # ---- 本地数据 / 模型（大文件不入库） ----
 data/
 models/

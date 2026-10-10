@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
 import threading
 import time
 from collections import OrderedDict
@@ -302,6 +303,13 @@ class TranslationService:
             candidates = self.engine_names()
             skipped.clear()
 
+        # 并发竞速：同时打前几个后端，谁先给出可用译文就用谁。
+        # 串行回退的问题是"首选被限流就要逐个等超时"，实测常白等 2~5 秒。
+        if self.config.race_engines and len(candidates) > 1:
+            result = self._race(candidates, text, source, target, errors, attempts, on_attempt)
+            if result is not None:
+                return self._finish(result, key, target, attempts)
+
         for name in candidates:
             translator = self.engine(name)
             if translator is None or not translator.is_available():
@@ -322,17 +330,7 @@ class TranslationService:
                 continue
 
             self._mark_success(name)
-            normalized = self._normalize(result, target, attempts)
-            if self.config.cache_enabled:
-                self.cache.put(
-                    key,
-                    _CacheEntry(
-                        text=normalized.text,
-                        provider=normalized.provider,
-                        source_lang=normalized.source_lang,
-                    ),
-                )
-            return normalized
+            return self._finish(result, key, target, attempts)
 
         problems = dict(errors)
         problems.update({k: f"冷却中（{v}）" for k, v in skipped.items()})
@@ -340,6 +338,117 @@ class TranslationService:
             f"{ENGINE_LABELS.get(k, k)}: {v}" for k, v in problems.items()
         )
         raise NoEngineAvailable(f"所有翻译后端均失败（{detail}）", problems)
+
+    # ------------------------------------------------------------------
+    def _race(
+        self,
+        candidates: List[str],
+        text: str,
+        source: str,
+        target: str,
+        errors: Dict[str, str],
+        attempts: List[str],
+        on_attempt: Optional[Callable[[str], None]],
+    ) -> Optional[TranslateResult]:
+        """并发请求多个后端，返回第一个成功的译文；全失败返回 ``None``。
+
+        采用"先冲一组、超时再补一个"的策略：一开始只发前 ``race_size`` 个，
+        若 ``race_stagger`` 秒内没人回来，再放一个后端进池。
+        这样既避免了把请求量一次性翻几倍（免费接口很容易因此触发限流），
+        又不会在首选被限流时干等。
+
+        主线程会阻塞等待（本方法由工作线程调用），因此设有硬超时，
+        避免某个后端卡住导致界面一直转圈。
+        """
+        size = max(1, min(self.config.race_size, len(candidates)))
+        stagger = max(0.0, float(self.config.race_stagger))
+        results: "queue.Queue[tuple]" = queue.Queue()
+        lock = threading.Lock()
+        stop = threading.Event()
+
+        def worker(name: str) -> None:
+            translator = self.engine(name)
+            if translator is None or not translator.is_available():
+                results.put((name, None, "后端不可用"))
+                return
+            if on_attempt:
+                on_attempt(name)
+            try:
+                result = translator.translate(text, source, target)
+            except TranslationError as exc:
+                results.put((name, None, exc))
+            except Exception as exc:
+                results.put((name, None, exc))
+            else:
+                results.put((name, result, None))
+
+        pool: List[threading.Thread] = []
+
+        def launch(name: str) -> None:
+            thread = threading.Thread(target=worker, args=(name,), daemon=True)
+            thread.start()
+            pool.append(thread)
+
+        for name in candidates[:size]:
+            launch(name)
+        pending = list(candidates[size:])
+
+        deadline = time.monotonic() + max(6.0, float(self.config.request_timeout) * 2)
+        started = time.monotonic()
+        while True:
+            if stop.is_set():
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                with lock:
+                    if not errors:
+                        errors["(超时)"] = "所有并发后端均超时"
+                return None
+            try:
+                name, result, error = results.get(timeout=min(0.3, remaining))
+            except queue.Empty:
+                # 到点还没人回来，就再放一个后端进池
+                if pending and (time.monotonic() - started) >= stagger * (
+                    len(pool) - size + 1
+                ):
+                    launch(pending.pop(0))
+                continue
+
+            if error is not None:
+                errors[name] = str(error)
+                if isinstance(error, TranslationError):
+                    self._mark_failure(name, error)
+                else:
+                    with self._lock:
+                        self._cooldown[name] = time.monotonic() + ERROR_COOLDOWN
+                if pending:
+                    launch(pending.pop(0))
+                continue
+
+            self._mark_success(name)
+            stop.set()  # 通知其它仍在跑的后端：不用再等了
+            return result
+
+    # ------------------------------------------------------------------
+    def _finish(
+        self,
+        result: TranslateResult,
+        key: str,
+        target: str,
+        attempts: List[str],
+    ) -> TranslateResult:
+        """归一化结果并写缓存（串行与竞速两条路径共用）。"""
+        normalized = self._normalize(result, target, attempts)
+        if self.config.cache_enabled:
+            self.cache.put(
+                key,
+                _CacheEntry(
+                    text=normalized.text,
+                    provider=normalized.provider,
+                    source_lang=normalized.source_lang,
+                ),
+            )
+        return normalized
 
     # ------------------------------------------------------------------
     def _normalize(

@@ -27,16 +27,43 @@
 | 免安装分发 | 提供 PyInstaller 打包配置，产出独立目录，目标机器无需装 Python |
 | 高 DPI 适配 | 与 GDI 统一使用设备像素，多显示器 / 125% 缩放下框选区与屏幕严丝合缝 |
 
-### 翻译后端实测（国内网络）
+### 翻译后端实测（本机网络，可复测）
 
-`scripts/probe_engines.py` 可复测；下表为默认优先级，可在设置里调整：
+跑 `scripts\benchmark_translate.py` 可以复测下面的数字。默认顺序即按此表排定：
 
-| 后端 | 典型时延 | 说明 |
+| 后端 | 中位时延 | 成功率 | 译文质量 | 说明 |
+|---|---|---|---|---|
+| 有道翻译 | **0.10s** | 好 | 87% | 最快；**连续使用会触发限流**（错误码 411），此时自动降级 |
+| Bing 翻译 | 0.94s | 5/5 | 87% | 响应带 `usedLLM: true`，用的是大模型翻译，质量与有道同级 |
+| MyMemory | 1.10s | 5/5 | 83% | 稳定，作为兜底 |
+| Google 免费端点 | 不可达 | 0/5 | — | 本机持续返回 429，排最后 |
+
+> **域名很关键**：Bing 的 `cn.bing.com` 会返回 HTTP 200 但**内容为空**（反爬收紧），
+> 而 `www.bing.com` 同一套令牌流程能正常返回。程序按 `www` → `cn` 顺序尝试。
+> 排错用 `scripts\diagnose_bing.py`，它会打印令牌解析与接口返回的原始内容。
+
+### 关于「翻译不够准」
+
+免费机器翻译接口的准确度上限大致就在 **85% 左右**（上面的命中率是关键词粗判），
+短句、含歧义的句子最容易出偏差。这是接口本身的能力边界，换后端提升有限。
+
+**想要明显更准**，需要换成大模型翻译接口（DeepSeek / OpenAI 等），
+架构上已经预留——`Translator` 接口实现一个类、在 `ENGINE_FACTORIES` 注册即可，
+回退、缓存、字形归一化都会自动生效。代价是需要 API Key 且按量计费。
+
+### 性能
+
+端到端实测（1000×240 的截图，含 2 行英文）：
+
+| 环节 | 耗时 | 说明 |
 |---|---|---|
-| 有道翻译 | **0.2 ~ 1s** | 最快，短句质量好，首选 |
-| MyMemory | 1 ~ 3s | 免费额度制，较稳定，第二顺位 |
-| Bing 翻译 | 1 ~ 3s | 需先取会话令牌，第三顺位 |
-| Google 免费端点 | 视网络 | 国内常被阻断，能直连时质量最好 |
+| 本地 OCR | ~1.0–2.0s | 首次含模型加载约 3s，之后常驻内存 |
+| 翻译 | 0.1–0.3s | 有道可用时；降级到 Bing 约 1s |
+| **合计** | **约 2.1s** | 模型预热后 |
+
+OCR 的一项调优：关闭**文字方向分类器**（`use_cls=False`）。
+屏幕上的文字几乎总是横向的，分类器属于白跑，关掉省约 18% 且准确度不变
+（实测 2.08s → 1.71s，准确度都 100%）。详见 `scripts\benchmark_ocr_options.py`。
 
 ---
 
@@ -130,6 +157,9 @@ python scripts\bootstrap_dev.py
 | `.venv\Scripts\python.exe scripts\launch_check.py` | 真的启动一次主程序，确认常驻、单实例、热键注册与日志 |
 | `.venv\Scripts\python.exe scripts\verify_package.py` | 真的启动打包后的 exe，确认它在没有 Python 的环境里也能跑 |
 | `.venv\Scripts\python.exe scripts\probe_engines.py` | 逐个探测翻译后端在你的网络下的连通性与时延 |
+| `.venv\Scripts\python.exe scripts\benchmark_translate.py` | 各后端的成功率 / 时延 / 译文命中率实测 |
+| `.venv\Scripts\python.exe scripts\benchmark_ocr_options.py` | OCR 参数对速度与准确率的影响实测 |
+| `.venv\Scripts\python.exe scripts\diagnose_bing.py` | Bing 接口取证：令牌解析与原始返回结构 |
 
 ---
 

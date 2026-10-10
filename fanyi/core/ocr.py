@@ -167,12 +167,33 @@ class RapidOcrEngine(OcrEngine):
                     "  .venv\\Scripts\\python -m pip install rapidocr-onnxruntime"
                 ) from exc
             try:
-                self._engine = RapidOCR()
+                self._engine = RapidOCR(**self._engine_kwargs())
             except Exception as exc:
                 self._load_error = str(exc)
                 raise OcrError(f"OCR 模型加载失败: {exc}") from exc
-            logger.info("RapidOCR 模型加载完成")
+            logger.info("RapidOCR 模型加载完成（参数 %s）", self._engine_kwargs())
         return self._engine
+
+    @staticmethod
+    def _engine_kwargs() -> Dict[str, Any]:
+        """构造参数。
+
+        ``use_cls=False`` 关掉**文字方向分类器**：它的作用是把倒置的文字转正，
+        而桌面截图里的文字几乎总是横向的，这一步属于白跑。
+        实测（``scripts/benchmark_ocr_options.py``，三组合成图）：
+
+        ==========================  ==========  ==========
+        配置                         中位时延     准确度
+        ==========================  ==========  ==========
+        默认（use_cls=true）          2.08s       100%
+        关方向分类                    1.71s       100%
+        侧长上限调到 1280             3.17s       100%
+        ==========================  ==========  ==========
+
+        因此关掉分类器（省约 18% 且准确度不变），而 ``limit_side_len``
+        保持默认 736 —— 调大只会更慢，准确度没有提升。
+        """
+        return {"use_cls": False}
 
     def warmup(self) -> None:
         try:

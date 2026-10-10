@@ -16,7 +16,7 @@ from .languages import EN, ZH_HANS, ZH_HANT
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.3.1"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
@@ -32,12 +32,27 @@ UI_LANGUAGE_CHOICES = [
     ("en", "英语", "English"),
 ]
 
-#: 默认后端顺序（按实测时延与稳定性排序，可用 scripts/probe_engines.py 复测）
-DEFAULT_ENGINES = ["youdao", "mymemory", "bing", "google"]
+#: 默认后端顺序。
+#:
+#: 依据是实测（`scripts/benchmark_translate.py`，本机网络）：
+#:
+#: ===========  ==========  ==========  ====================================
+#: 后端          中位时延     成功率      备注
+#: ===========  ==========  ==========  ====================================
+#: youdao       0.11s       好          快，但连续使用会触发 411 限流
+#: bing         0.94s       5/5         译文带 usedLLM，质量好
+#: mymemory     1.10s       5/5         稳定，作为兜底
+#: google       不可达       0/5         持续 429，放最后
+#: ===========  ==========  ==========  ====================================
+#:
+#: 有道排第一（可用时最快）；它被限流后按顺序落到 Bing，
+#: 而不是先浪费 2~4 秒在坏掉的端点上。
+DEFAULT_ENGINES = ["youdao", "bing", "mymemory", "google"]
 #: 早期版本的默认顺序，加载旧配置时自动升级
 LEGACY_ENGINES = [
     ["google", "mymemory", "bing"],
     ["google", "bing", "mymemory"],
+    ["youdao", "mymemory", "bing", "google"],
 ]
 
 
@@ -88,6 +103,17 @@ class Config:
     # --- 翻译 ---
     #: 后端优先级，按顺序尝试
     translate_engines: List[str] = field(default_factory=lambda: list(DEFAULT_ENGINES))
+    #: 是否并发请求前几个后端、取最快返回的那个。
+    #:
+    #: **默认关闭**，因为实测表明它有害：并发会更快触发免费接口的限流，
+    #: 于是大量请求落到较慢的兜底后端。实测对比（`scripts/benchmark_race.py`）：
+    #: 串行中位 0.09s（首选可用时），并发竞速反而 0.69s。
+    #: 仅在"首选经常被限流且兜底也很慢"的网络下才值得开启。
+    race_engines: bool = False
+    #: 参与竞速的后端个数（顺序取 translate_engines 前 N 个）
+    race_size: int = 2
+    #: 开始竞速后，等多久还没结果就再放一个后端进来
+    race_stagger: float = 1.2
     request_timeout: float = 8.0
     max_chars_per_request: int = 1800
     cache_enabled: bool = True
