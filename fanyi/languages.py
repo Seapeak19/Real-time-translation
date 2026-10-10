@@ -102,8 +102,57 @@ def info(code: str) -> LanguageInfo:
 
 
 def label(code: str) -> str:
-    """语言的中文显示名。"""
-    return info(code).label_zh
+    """语言的显示名，跟随当前界面语言。
+
+    * 简体中文界面 → ``简体中文`` / ``英语``
+    * 繁体中文界面 → ``簡體中文`` / ``英語``
+    * 英语界面     → ``Chinese (Simplified)`` / ``English``
+    """
+    info_ = info(code)
+    ui_language = _current_ui_language()
+    if ui_language == EN:
+        return _EN_NAMES.get(code, info_.label_zh)
+    if ui_language == ZH_HANT:
+        return _HANT_NAMES.get(info_.label_zh, info_.label_en)
+    return info_.label_zh
+
+
+# ---------------------------------------------------------------------------
+# 界面语言（由界面层注入，避免核心层反向依赖 ui）
+# ---------------------------------------------------------------------------
+#: 由 :mod:`fanyi.ui.i18n` 注入的"当前界面语言"取值函数。
+#: 之所以用注入而不是直接 import：languages 属于核心层，ui.i18n 依赖它，
+#: 反向导入会形成循环依赖。未注入时一律返回中文名，核心层仍可独立使用。
+_ui_language_getter = None
+
+_HANT_NAMES = {
+    "简体中文": "簡體中文",
+    "繁体中文": "繁體中文",
+    "英语": "英語",
+    "自动检测": "自動偵測",
+}
+
+_EN_NAMES = {
+    ZH_HANS: "Chinese (Simplified)",
+    ZH_HANT: "Chinese (Traditional)",
+    EN: "English",
+    AUTO: "Auto detect",
+}
+
+
+def set_ui_language_getter(getter) -> None:
+    """注册界面语言取值函数（由 :mod:`fanyi.ui.i18n` 调用）。"""
+    global _ui_language_getter
+    _ui_language_getter = getter
+
+
+def _current_ui_language() -> str:
+    if _ui_language_getter is None:
+        return ZH_HANS
+    try:
+        return _ui_language_getter() or ZH_HANS
+    except Exception:  # pragma: no cover - 防御性
+        return ZH_HANS
 
 
 def to_provider(code: str, provider: str) -> str:

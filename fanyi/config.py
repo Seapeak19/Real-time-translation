@@ -12,15 +12,25 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .languages import EN, ZH_HANS
+from .languages import EN, ZH_HANS, ZH_HANT
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.3.0"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
 DEFAULT_REPEAT_HOTKEY = "ctrl+alt+x"
+
+#: 界面语言默认值（与翻译的源/目标语言无关）
+DEFAULT_UI_LANGUAGE = ZH_HANS
+
+#: 界面语言可选项（代码, 中文名, 英文名）
+UI_LANGUAGE_CHOICES = [
+    (ZH_HANS, "简体中文", "Chinese (Simplified)"),
+    (ZH_HANT, "繁体中文", "Chinese (Traditional)"),
+    ("en", "英语", "English"),
+]
 
 #: 默认后端顺序（按实测时延与稳定性排序，可用 scripts/probe_engines.py 复测）
 DEFAULT_ENGINES = ["youdao", "mymemory", "bing", "google"]
@@ -83,6 +93,8 @@ class Config:
     cache_enabled: bool = True
 
     # --- 界面 ---
+    #: 界面显示语言（zh-Hans / zh-Hant / en），与翻译的源/目标语言互不影响
+    ui_language: str = ZH_HANS
     result_always_on_top: bool = True
     result_auto_copy: bool = False
     result_font_size: int = 12

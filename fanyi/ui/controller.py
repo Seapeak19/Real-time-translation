@@ -18,7 +18,12 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QImage
 
 from ..config import APP_TITLE, Config, app_home, config_path, history_path
-from ..core.pipeline import PipelineError, TranslationPipeline
+from ..core.pipeline import (
+    OCR_STAGE,
+    TRANSLATE_STAGE,
+    PipelineError,
+    TranslationPipeline,
+)
 from ..core.translate import TranslationService
 from ..hotkey import GlobalHotkeyManager
 from ..languages import label as lang_label
@@ -26,13 +31,19 @@ from ..overlay import OverlayManager, Selection, nudge_to_foreground
 from ..screenshot import Capture, crop, grab_virtual_desktop, to_numpy
 from .history import HistoryEntry, HistoryStore
 from .history_panel import HistoryPanel
+from .i18n import app_title, engine_label, set_language, tr, trn
 from .main_window import MainWindow
 from .result_window import ResultWindow
-from .settings_dialog import SettingsDialog
 from .tray import TrayIcon
 from .worker import TaskRunner
 
 logger = logging.getLogger(__name__)
+
+#: 管线进度阶段 → 界面文案（键与简体中文原文一致）
+_PROGRESS_KEYS = {
+    OCR_STAGE: "正在识别文字…",
+    TRANSLATE_STAGE: "正在翻译…",
+}
 
 #: 隐藏覆盖层后等待再抓屏的时间（毫秒），给系统合成器留出刷新时间
 RESHOW_DELAY_MS = 130
@@ -61,7 +72,7 @@ class AppController(QObject):
         self._busy = False
         self._last: Optional[_LastCapture] = None
         self._last_source_text = ""
-        self._settings_window: Optional[SettingsDialog] = None
+        self._settings_window = None  # 旧版对话框已移除，保留字段避免外部引用报错
         self._history_window: Optional[HistoryPanel] = None
         self._main_window: Optional[MainWindow] = None
         self._hotkeys_suspended = False
@@ -127,8 +138,10 @@ class AppController(QObject):
 
             self.tray.notify(
                 APP_TITLE,
-                "已在后台运行，按 "
-                f"{format_hotkey(self.hotkeys.hotkeys.get('capture', ''))} 开始截图翻译。",
+                trn(
+                    "已在后台运行，按 {hotkey} 开始截图翻译。",
+                    hotkey=format_hotkey(self.hotkeys.hotkeys.get('capture', '')),
+                ),
                 3000,
             )
 
@@ -148,12 +161,12 @@ class AppController(QObject):
         if self.overlay.active:
             return
         if self._busy:
-            self.tray.notify(APP_TITLE, "上一次识别还在进行中，请稍候…", 2000)
+            self.tray.notify(app_title(), tr("上一次识别还在进行中，请稍候…"), 2000)
             return
 
         capture = grab_virtual_desktop()
         if capture is None or capture.is_empty:
-            self.tray.notify(APP_TITLE, "屏幕抓取失败，无法开始截图。", 4000)
+            self.tray.notify(app_title(), tr("屏幕抓取失败，无法开始截图。"), 4000)
             return
 
         started = self.overlay.start(
@@ -164,7 +177,7 @@ class AppController(QObject):
         )
         if not started:
             self.overlay.close()
-            self.tray.notify(APP_TITLE, "没有检测到可用显示器。", 4000)
+            self.tray.notify(app_title(), tr("没有检测到可用显示器。"), 4000)
 
     def _on_capture_cancelled(self) -> None:
         self.overlay.close()
@@ -181,7 +194,7 @@ class AppController(QObject):
 
         region = crop(selection.capture, selection.x, selection.y, selection.width, selection.height)
         if region is None or region.is_empty:
-            self.tray.notify(APP_TITLE, "截取区域为空，请重新框选。", 3000)
+            self.tray.notify(app_title(), tr("截取区域为空，请重新框选。"), 3000)
             return
 
         self._last = _LastCapture(
@@ -196,10 +209,10 @@ class AppController(QObject):
     def repeat_last(self) -> None:
         """重译上次框选的区域（不重新截图）。"""
         if self._busy:
-            self.tray.notify(APP_TITLE, "上一次识别还在进行中，请稍候…", 2000)
+            self.tray.notify(app_title(), tr("上一次识别还在进行中，请稍候…"), 2000)
             return
         if self._last is None:
-            self.tray.notify(APP_TITLE, "还没有框选过区域，先按热键截一次图吧。", 3000)
+            self.tray.notify(app_title(), tr("还没有框选过区域，先按热键截一次图吧。"), 3000)
             return
 
         self._run(self._last.image)
@@ -211,12 +224,12 @@ class AppController(QObject):
         """在工作线程里跑 OCR + 翻译。"""
         array = to_numpy(image, scale=float(self.config.ocr_scale or 1.0))
         if array.size == 0:
-            self.tray.notify(APP_TITLE, "截图内容为空。", 3000)
+            self.tray.notify(app_title(), tr("截图内容为空。"), 3000)
             return False
 
         self._busy = True
         self.result_window.set_languages(self.config.source_lang, self.config.target_lang)
-        self.result_window.show_loading("正在识别文字…")
+        self.result_window.show_loading(tr("正在识别文字…"))
         if anchor is not None:
             self.result_window.move_near(anchor[0], anchor[1])
         else:
@@ -237,9 +250,26 @@ class AppController(QObject):
 
     # ------------------------------------------------------------------
     def _on_progress(self, stage: str, text: str) -> None:
-        """在主线程更新进度文案。"""
-        if self.result_window.isVisible():
+        """在主线程更新进度文案。
+
+        ``stage`` 是稳定的阶段标识，文案在这里翻译成当前界面语言；
+        ``text`` 只在阶段未知时作为兜底（核心层给的中性中文）。
+        后端名放在 ``text`` 里传来，这里再查一次显示名，
+        这样切到英文界面时进度里也不会出现中文引擎名。
+        """
+        if not self.result_window.isVisible():
+            return
+        key = _PROGRESS_KEYS.get(stage)
+        if key is None:
             self.result_window.show_loading(text)
+            return
+        engine = text if stage == TRANSLATE_STAGE and text != key else ""
+        if engine:
+            self.result_window.show_loading(
+                trn("正在翻译（{engine}）…", engine=engine_label(engine))
+            )
+        else:
+            self.result_window.show_loading(tr(key))
 
     def _on_success(self, result: object) -> None:
         self._busy = False
@@ -285,12 +315,14 @@ class AppController(QObject):
         if isinstance(exc, PipelineError):
             message = str(exc)
         else:
-            message = f"出现未预期的错误：{type(exc).__name__}: {exc}"
+            message = trn(
+                "出现未预期的错误：{type}: {message}", type=type(exc).__name__, message=exc
+            )
             logger.exception("翻译流程异常", exc_info=exc)
 
         self.result_window.show_error(message, original=self._last_source_text or original)
         if not self.result_window.isVisible():
-            self.tray.notify(APP_TITLE, message, 5000)
+            self.tray.notify(app_title(), message, 5000)
 
     def retranslate_current(self) -> None:
         """对结果窗口里的原文重新翻译（不重新截图/OCR）。"""
@@ -299,11 +331,11 @@ class AppController(QObject):
             self.repeat_last()
             return
         if self._busy:
-            self.tray.notify(APP_TITLE, "上一次识别还在进行中，请稍候…", 2000)
+            self.tray.notify(app_title(), tr("上一次识别还在进行中，请稍候…"), 2000)
             return
 
         self._busy = True
-        self.result_window.show_loading("正在重新翻译…")
+        self.result_window.show_loading(tr("正在重新翻译…"))
 
         def task() -> object:
             return self.translation.translate(
@@ -328,7 +360,9 @@ class AppController(QObject):
 
         def failed(exc: Exception) -> None:
             self._busy = False
-            self.result_window.show_error(f"重译失败：{exc}", original=text)
+            self.result_window.show_error(
+                trn("重译失败：{message}", message=exc), original=text
+            )
 
         if not self.worker.start(task, done, failed):
             self._busy = False
@@ -370,6 +404,7 @@ class AppController(QObject):
             window.open_config_dir_requested.connect(self.open_config_dir)
             window.reapply_hotkeys_requested.connect(self._on_reapply_hotkeys)
             window.recording_changed.connect(self._on_recording_changed)
+            window.ui_language_changed.connect(self.set_ui_language)
             self._main_window = window
 
         self._main_window.reload_from(self.config)
@@ -387,7 +422,7 @@ class AppController(QObject):
 
         target = app_home()
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
-            self.tray.notify(APP_TITLE, f"配置目录：{target}", 6000)
+            self.tray.notify(app_title(), trn("配置目录：{path}", path=target), 6000)
 
     def _apply_settings(self, notify: bool = True) -> None:
         """把主窗口里的设置写回配置、落盘并生效。"""
@@ -442,7 +477,7 @@ class AppController(QObject):
             self._sync_hotkey_status()
 
         if notify:
-            self.tray.notify(APP_TITLE, "设置已保存并生效。", 1500)
+            self.tray.notify(app_title(), tr("设置已保存并生效。"), 1500)
 
     # --- 主窗口各分组的变化处理 ---
     def _on_main_languages_changed(self) -> None:
@@ -456,6 +491,32 @@ class AppController(QObject):
             # 目标语言变了，已有译文按新语言重译一次，省得手动点
             self.retranslate_current()
         window.refresh_status()
+
+    # ------------------------------------------------------------------
+    # 界面语言
+    # ------------------------------------------------------------------
+    def set_ui_language(self, code: str) -> None:
+        """切换界面显示语言并立即刷新所有已打开的窗口。
+
+        与其它设置不同，界面语言**不走** ``_apply_settings``：
+        它必须先把当前语言设好，再让各窗口重新取一遍文案；
+        顺序反了会得到"半新半旧"的界面。
+        """
+        if not set_language(code):
+            return
+
+        self.config.ui_language = code
+        self._save_config()
+
+        # 各窗口刷新自己的文案（没有 retranslate 的跳过）
+        for window in (self._main_window, self.result_window, self._history_window):
+            retranslate = getattr(window, "retranslate", None)
+            if callable(retranslate):
+                retranslate()
+
+        self.tray.retranslate()
+        self.tray.refresh_tooltip()
+        logger.info("界面语言已切换为 %s 并刷新界面", code)
 
     def _on_main_hotkeys_changed(self) -> None:
         self._apply_settings(notify=False)
@@ -474,9 +535,13 @@ class AppController(QObject):
         self._sync_hotkey_status()
         if self._main_window is not None:
             if self._hotkey_error:
-                self.tray.notify(APP_TITLE, f"热键注册失败：{self._hotkey_error}", 5000)
+                self.tray.notify(
+                    APP_TITLE,
+                    trn("热键注册失败：{reason}", reason=self._hotkey_error),
+                    5000,
+                )
             else:
-                self.tray.notify(APP_TITLE, "快捷键已重新注册。", 2000)
+                self.tray.notify(app_title(), tr("快捷键已重新注册。"), 2000)
 
     def _sync_hotkey_status(self) -> None:
         if self._main_window is None:
@@ -497,35 +562,7 @@ class AppController(QObject):
         else:
             self._resume_hotkeys()
 
-    # --- 旧版设置对话框（保留兼容） ---
-    def open_settings_dialog(self) -> None:
-        if self._settings_window is None:
-            self._settings_window = SettingsDialog(self.config)
-            self._settings_window.config_saved.connect(self._on_settings_saved)
-        self._settings_window.show()
-        self._settings_window.raise_()
-        self._settings_window.activateWindow()
-
-    def _on_settings_saved(self, config: Config) -> None:
-        config.save(config_path())
-        self.tray.set_target(config.target_lang)
-        self.tray.set_source(config.source_lang)
-        self.tray.refresh_tooltip()
-
-        self.result_window.set_languages(config.source_lang, config.target_lang)
-        self.result_window.set_pinned(config.result_always_on_top)
-        self.result_window.set_show_original(config.show_original)
-        self.result_window.set_font_size(config.result_font_size)
-        self.history.set_limit(config.history_limit)
-
-        # 后端顺序/超时可能变了，重建服务
-        self.translation.close()
-        self.translation = TranslationService(config)
-        self.pipeline.translation = self.translation
-
-        self._register_hotkeys()
-        self._sync_hotkey_status()
-        self.tray.notify(APP_TITLE, "设置已保存。", 2000)
+    # --- 旧版设置对话框已于 v0.2.2 移除 ---
 
     def _save_config(self) -> None:
         try:
@@ -547,7 +584,7 @@ class AppController(QObject):
         self._history_window.activateWindow()
 
     def _retranslate_text(self, text: str) -> None:
-        self.result_window.show_loading("正在重新翻译…")
+        self.result_window.show_loading(tr("正在重新翻译…"))
         self.result_window.reveal()
         self.result_window.original_text.setPlainText(text)
         self.retranslate_current()
@@ -556,11 +593,11 @@ class AppController(QObject):
         count = self.history.clear()
         if self._history_window is not None:
             self._history_window.set_entries([])
-        self.tray.notify(APP_TITLE, f"已清空 {count} 条历史记录。", 2000)
+        self.tray.notify(app_title(), trn("已清空 {count} 条历史记录。", count=count), 2000)
 
     def clear_cache(self) -> None:
         count = self.translation.cache.clear()
-        self.tray.notify(APP_TITLE, f"已清空翻译缓存（{count} 条）。", 2000)
+        self.tray.notify(app_title(), trn("已清空翻译缓存（{count} 条）。", count=count), 2000)
 
     # ------------------------------------------------------------------
     # 其它入口
@@ -582,7 +619,7 @@ class AppController(QObject):
     def _on_hotkey_error(self, message: str) -> None:
         self._hotkey_error = message
         self._sync_hotkey_status()
-        self.tray.notify("热键注册失败", message, 6000)
+        self.tray.notify(tr("热键注册失败"), message, 6000)
 
     # ------------------------------------------------------------------
     # 录制快捷键时临时停用全局热键

@@ -19,12 +19,25 @@ from .translate import TranslationService
 
 logger = logging.getLogger(__name__)
 
-#: 进度回调：阶段标识 + 可读文案
+#: 进度阶段标识。核心层只发标识，**文案由界面层翻译**——
+#: 这样核心层不必知道界面语言，也能被命令行/测试独立使用。
+OCR_STAGE = "ocr"
+TRANSLATE_STAGE = "translate"
+
+#: 进度回调：阶段标识 + 中性文案（界面层通常会按 stage 换成自己的语言）
 ProgressFn = Callable[[str, str], None]
 
 
 class PipelineError(RuntimeError):
-    """管线可预期的失败（图片为空、没识别到文字、OCR 不可用…）。"""
+    """管线可预期的失败（图片为空、没识别到文字、OCR 不可用…）。
+
+    ``code`` 是稳定的机器可读标识，界面层据此选翻译键；
+    ``str(exc)`` 仍是可读的中文，供命令行与日志使用。
+    """
+
+    def __init__(self, message: str, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass
@@ -84,7 +97,7 @@ class TranslationPipeline:
     def recognize(self, image, on_progress: Optional[ProgressFn] = None) -> OcrResult:
         """只做 OCR。"""
         if on_progress:
-            on_progress("ocr", "正在识别文字…")
+            on_progress(OCR_STAGE, "正在识别文字…")
         engine = self.ocr
         if not engine.is_ready():
             raise PipelineError(
@@ -112,14 +125,16 @@ class TranslationPipeline:
         """完整流程：图像 → OCR → 翻译。"""
         started = time.perf_counter()
 
+        # 注意：OCR 阶段的进度由 recognize() 自己上报，这里不要再发一次，
+        # 否则界面会连续收到两条"正在识别文字…"（表现为状态文字闪一下）
         ocr_result = self.recognize(image, on_progress)
         source_text = join_lines([l.text for l in ocr_result.lines], self.config.source_lang)
 
         if not source_text.strip():
-            raise PipelineError("未识别到文字，请框选包含清晰文字的区域后重试")
+            raise PipelineError("未识别到文字，请框选包含清晰文字的区域后重试", code="no_text")
 
         if on_progress:
-            on_progress("translate", "正在翻译…")
+            on_progress(TRANSLATE_STAGE, "正在翻译…")
 
         translate_started = time.perf_counter()
         try:
@@ -128,16 +143,16 @@ class TranslationPipeline:
                 target=self.config.target_lang,
                 source=self.config.source_lang,
                 use_cache=use_cache,
-                on_attempt=lambda name: on_progress(
-                    "translate", f"正在翻译（{TRANSLATE_LABELS.get(name, name)}）…"
-                )
+                # 每次切换后端只报告"阶段 + 后端名"，界面自己决定怎么显示
+                on_attempt=lambda name: on_progress(TRANSLATE_STAGE, name)
                 if on_progress
                 else None,
             )
         except NoEngineAvailable as exc:
             raise PipelineError(
                 f"翻译失败：所有后端均不可用。\n{exc}\n"
-                "请检查网络连接，或在设置里调整后端顺序。"
+                "请检查网络连接，或在设置里调整后端顺序。",
+                code="all_backends_failed",
             ) from exc
 
         translate_seconds = time.perf_counter() - translate_started

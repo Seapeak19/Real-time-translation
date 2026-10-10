@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from .i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def bring_to_front() -> None:
         if original or translation:
             window.reveal()
         else:
-            controller.tray.notify("翻译", "程序已在运行，按热键开始截图翻译。", 3000)
+            controller.tray.notify(tr("翻译"), tr("程序已在运行，按热键开始截图翻译。"), 3000)
     except Exception as exc:  # pragma: no cover - 防御性
         logger.debug("前台激活失败: %s", exc)
 

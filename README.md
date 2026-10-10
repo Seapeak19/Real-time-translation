@@ -91,6 +91,9 @@ python scripts\bootstrap_dev.py
 | `.venv\Scripts\python.exe scripts\selfcheck.py` | 环境自检：依赖、OCR、翻译、截图、热键、端到端 |
 | `.venv\Scripts\python.exe scripts\gui_smoketest.py` | 界面冒烟：托盘、结果窗、设置、历史、框选覆盖层、后台线程、真实 OCR+翻译 |
 | `.venv\Scripts\python.exe scripts\diagnose_ui.py` | 界面外观诊断：真实渲染各窗口为 PNG、检查配色对比度与字体 |
+| `.venv\Scripts\python.exe scripts\audit_i18n.py` | 多语言自检：列出漏翻的界面字符串（应为"干净"） |
+| `.venv\Scripts\python.exe scripts\i18n_smoketest.py` | 三种界面语言下逐个控件检查文案是否跟随 |
+| `.venv\Scripts\python.exe scripts\i18n_e2e.py` | 界面语言切换端到端：选语言 → 落盘 → 重启恢复 |
 | `.venv\Scripts\python.exe scripts\launch_check.py` | 真的启动一次主程序，确认常驻、单实例、热键注册与日志 |
 | `.venv\Scripts\python.exe scripts\verify_package.py` | 真的启动打包后的 exe，确认它在没有 Python 的环境里也能跑 |
 | `.venv\Scripts\python.exe scripts\probe_engines.py` | 逐个探测翻译后端在你的网络下的连通性与时延 |
@@ -187,11 +190,40 @@ python -m fanyi --debug                   # 输出调试日志
 
 | 分组 | 能改什么 |
 |---|---|
-| **语言** | 源语言（可自动检测）、目标语言；一键互换；常用目标语言快捷按钮 |
+| **语言** | **界面语言**（简体中文 / 繁体中文 / English）；源语言（可自动检测）、目标语言；一键互换；常用目标语言快捷按钮 |
 | **快捷键** | 点「录制」后直接按组合键即可；可清除、可恢复默认；显示注册是否成功 |
 | **识别（OCR）** | 识别引擎、识别前放大倍数、最低置信度 |
 | **翻译** | 后端优先级（勾选 + 上下移）、请求超时、是否启用缓存、清空缓存 |
 | **界面** | 结果窗置顶/显示原文/自动复制、字号、历史条数上限、打开配置目录 |
+
+### 界面语言
+
+设置窗口 →「语言」页最上方可切换**界面显示语言**：**简体中文 / 繁体中文 / English**。
+选中即刻生效——设置窗口、托盘菜单、结果窗口、历史窗口会一起换语言，并写入配置，下次启动沿用。
+
+注意区分两个"语言"：
+
+| 设置项 | 作用 |
+|---|---|
+| **界面语言** | 你看到的按钮、菜单、提示是什么语言（本节主题） |
+| **源语言 / 目标语言** | 屏幕上的文字要被翻译成什么语言（与界面无关） |
+
+举例：界面语言设为 English、目标语言设为「简体中文」，就是在英文界面上把外文翻成中文。
+
+实现要点（见 `fanyi/ui/i18n.py`）：
+
+* **源码里的简体中文原文就是翻译键**，不额外维护 msgid 清单，
+  改代码时不会出现"键还在、文案已经变了"的脱节；
+* 漏翻的字符串回退显示中文原文，而不是 `settings.language.title` 这种占位符——
+  漏翻只是不够完美，不会变成看不懂的东西；
+* **繁体目录由简体自动转换生成**，与截图翻译用的简繁规则同源，不存在两份数据不一致；
+* 引擎名、语言名、应用名这些动态内容也跟随界面语言（不会出现"英文界面里冒出中文引擎名"）；
+* 控件把翻译键挂在动态属性 `_i18n` 上，切换语言时遍历刷新，不重建窗口
+  （重建会丢窗口位置、当前页签和正在录制的热键状态）。
+
+**新增一条界面文案**：在代码里用 `tr("中文原文")`（带插值用 `trn("共 {count} 条", count=n)`），
+然后把中文原文作为键补进 `fanyi/ui/i18n.py` 的 `ENGLISH` 字典。繁体会自动生成。
+漏补键不会静默失败——`tests/test_i18n.py` 会扫描源码把缺失的键报出来。
 
 ### 快捷键是怎么录进去的
 
@@ -226,8 +258,9 @@ python -m fanyi --debug                   # 输出调试日志
 
 | 键 | 默认值 | 说明 |
 |---|---|---|
-| `target_lang` | `zh-Hans` | 目标语言：`zh-Hans` / `zh-Hant` / `en` |
-| `source_lang` | `auto` | 源语言，`auto` 为自动检测 |
+| `ui_language` | `zh-Hans` | **界面**显示语言：`zh-Hans` / `zh-Hant` / `en` |
+| `target_lang` | `zh-Hans` | 翻译目标语言：`zh-Hans` / `zh-Hant` / `en` |
+| `source_lang` | `auto` | 翻译源语言，`auto` 为自动检测 |
 | `hotkey` | `ctrl+alt+z` | 截图翻译热键 |
 | `repeat_hotkey` | `ctrl+alt+x` | 重译上次区域热键 |
 | `ocr_scale` | `1.0` | 识别前放大倍数，小字识别不准时调到 `1.5` ~ `2.0` |
@@ -260,11 +293,11 @@ python -m fanyi --debug                   # 输出调试日志
 │   └── ui/
 │       ├── controller.py     总控制器：串起托盘/热键/覆盖层/管线/窗口
 │       ├── theme.py          统一明亮主题（浅色调色板 + 全局样式表）
+│       ├── i18n.py           界面多语言（英语目录 + 自动生成繁体 + tr/trn）
 │       ├── main_window.py    设置主窗口（语言/快捷键/OCR/翻译/界面）
 │       ├── hotkey_edit.py    快捷键录制控件
 │       ├── tray.py           托盘图标与菜单
 │       ├── result_window.py  置顶结果卡片
-│       ├── settings_dialog.py 旧版设置对话框（保留兼容）
 │       ├── history.py        历史记录存储
 │       ├── history_panel.py  历史记录面板
 │       ├── worker.py         工作线程（识别与网络请求不阻塞界面）
@@ -275,6 +308,11 @@ python -m fanyi --debug                   # 输出调试日志
 │   ├── gui_smoketest.py  界面冒烟测试（含设置窗口与快捷键录制）
 │   ├── diagnose_dpi.py   框选坐标体系诊断（排查高 DPI 错位）
 │   ├── diagnose_ui.py    界面外观诊断（渲染截图 + 配色对比度 + 字体）
+│   ├── audit_i18n.py     多语言自检：找出漏翻的界面字符串
+│   ├── i18n_smoketest.py 三种界面语言下的控件文案检查
+│   ├── i18n_e2e.py       界面语言切换端到端（含落盘与重启恢复）
+│   ├── scan_ui_strings.py 扫描待翻译字符串（新语种时用）
+│   ├── wrap_ui_strings.py 自动给界面字符串包 tr()（AST 改写）
 │   ├── launch_check.py   真实启动验证（常驻/单实例/热键）
 │   ├── verify_package.py 验证打包产物可独立运行
 │   ├── make_icon.py      生成程序图标
@@ -373,7 +411,8 @@ python -m fanyi --debug                   # 输出调试日志
 
 | 版本 | 提交 | 内容 |
 |---|---|---|
-| **v0.2.1** | `4d8bdcc` | 当前发布：修复设置界面「白底白字（像乱码）」与一明一暗，界面统一为明亮白色 |
+| **v0.3.0** | 本次 | 界面语言自定义：简体中文 / 繁体中文 / English 即时切换；全部界面文案多语言化 |
+| **v0.2.1** | `4d8bdcc` | 修复设置界面「白底白字（像乱码）」与一明一暗，界面统一为明亮白色 |
 | **v0.2.0** | `8bedbf4` | 设置主窗口（可视化录制快捷键/切换语言）、免安装打包、修复高 DPI 框选错位与多词热键失效 |
 | `v0.1.2-rc` | `f43d73e` | 中间快照：高 DPI 坐标修复 + 设置主窗口 |
 | `v0.1.1-rc` | `5185069` | 中间快照：免安装打包 + 单实例/焦点/文本拼接修复 |

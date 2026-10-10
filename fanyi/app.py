@@ -32,7 +32,18 @@ from typing import Optional, Sequence
 # ---------------------------------------------------------------------------
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
-from .config import APP_NAME, APP_TITLE, APP_VERSION, Config, app_home, config_path
+from .config import (
+    APP_NAME,
+    APP_TITLE,
+    APP_VERSION,
+    DEFAULT_UI_LANGUAGE,
+    Config,
+    app_home,
+    config_path,
+)
+# 界面文案函数不依赖 Qt，可以安全地在模块层导入
+from .ui.i18n import UI_LANGUAGES, app_title, tr, trn
+from .ui.i18n import tr
 
 logger = logging.getLogger("fanyi")
 
@@ -93,7 +104,7 @@ def translate_image_file(path: Path, config: Config) -> int:
 
     image = QImage(str(path))
     if image.isNull():
-        print(f"无法读取图片: {path}", file=sys.stderr)
+        print(trn("无法读取图片: {path}", path=path), file=sys.stderr)
         return 2
 
     from .core.pipeline import PipelineError, TranslationPipeline
@@ -106,18 +117,22 @@ def translate_image_file(path: Path, config: Config) -> int:
             on_progress=lambda stage, text: print(f"[{stage}] {text}", file=sys.stderr),
         )
     except PipelineError as exc:
-        print(f"失败: {exc}", file=sys.stderr)
+        print(trn("失败: {message}", message=exc), file=sys.stderr)
         return 1
     finally:
         pipeline.close()
 
-    print("--- 原文 ---")
+    print(tr("--- 原文 ---"))
     print(result.source_text)
-    print("--- 译文 ---")
+    print(tr("--- 译文 ---"))
     print(result.translation)
     print(
-        f"--- 引擎 {result.provider} · OCR {result.ocr_seconds:.2f}s "
-        f"· 翻译 {result.translate_seconds:.2f}s ---"
+        trn(
+            "--- 引擎 {engine} · OCR {ocr}s · 翻译 {translation}s ---",
+            engine=result.provider,
+            ocr=f"{result.ocr_seconds:.2f}",
+            translation=f"{result.translate_seconds:.2f}",
+        )
     )
     return 0
 
@@ -128,15 +143,15 @@ def translate_image_file(path: Path, config: Config) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=APP_NAME,
-        description=f"{APP_TITLE} · 截图识别文本并翻译的桌面工具",
+        description=f"{app_title()} · {tr('截图识别文本并翻译的桌面工具')}",
     )
-    parser.add_argument("--version", action="version", version=f"{APP_TITLE} {APP_VERSION}")
-    parser.add_argument("--lang", help="本次启动的目标语言（zh-Hans / zh-Hant / en）")
-    parser.add_argument("--source", help="本次启动的源语言（默认 auto 自动检测）")
-    parser.add_argument("--no-hotkey", action="store_true", help="不注册全局热键")
-    parser.add_argument("--translate-image", metavar="图片路径", help="直接翻译指定图片后退出")
-    parser.add_argument("--debug", action="store_true", help="输出调试日志")
-    parser.add_argument("--reset-config", action="store_true", help="恢复默认设置后启动")
+    parser.add_argument("--version", action="version", version=f"{app_title()} {APP_VERSION}")
+    parser.add_argument("--lang", help=tr("本次启动的目标语言（zh-Hans / zh-Hant / en）"))
+    parser.add_argument("--source", help=tr("本次启动的源语言（默认 auto 自动检测）"))
+    parser.add_argument("--no-hotkey", action="store_true", help=tr("不注册全局热键"))
+    parser.add_argument("--translate-image", metavar=tr("图片路径"), help=tr("直接翻译指定图片后退出"))
+    parser.add_argument("--debug", action="store_true", help=tr("输出调试日志"))
+    parser.add_argument("--reset-config", action="store_true", help=tr("恢复默认设置后启动"))
     return parser
 
 
@@ -184,7 +199,7 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
 
     guard = SingleInstanceGuard()
     if not guard.try_acquire():
-        print(f"{APP_TITLE} 已在运行（托盘图标），已唤起原实例。")
+        print(trn("{name} 已在运行（托盘图标），已唤起原实例。", name=app_title()))
         return 0
 
     # --- Qt 应用 ---
@@ -194,9 +209,16 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     from .screenshot import enable_dpi_awareness
     from .ui import activate
     from .ui.controller import AppController
+    from .ui.i18n import set_language
     from .ui.theme import apply_light_theme
 
     enable_dpi_awareness()  # 必须在创建 QApplication 之前
+
+    # 界面语言要在任何窗口构造之前设定，否则先建出来的控件文案会混用两种语言
+    if config.ui_language not in UI_LANGUAGES:
+        logger.warning("配置里的界面语言无法识别，回退简体中文: %s", config.ui_language)
+        config.ui_language = DEFAULT_UI_LANGUAGE
+    set_language(config.ui_language)
 
     QApplication.setApplicationName(APP_TITLE)
     QApplication.setApplicationDisplayName(APP_TITLE)
@@ -211,7 +233,7 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(
-            None, APP_TITLE, "当前系统不支持托盘图标，程序无法常驻运行。"
+            None, app_title(), tr("当前系统不支持托盘图标，程序无法常驻运行。")
         )
         guard.release()
         return 3

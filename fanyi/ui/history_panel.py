@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from .history import HistoryEntry
 from .theme import BASE_STYLESHEET
+from .i18n import tr, trn
 
 
 class HistoryPanel(QDialog):
@@ -36,7 +37,7 @@ class HistoryPanel(QDialog):
 
     def __init__(self, entries: Optional[List[HistoryEntry]] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("翻译历史")
+        self.setWindowTitle(tr("翻译历史"))
         # 带独立 windowFlags 的顶层窗口不一定继承应用级样式表，
         # 显式挂一份，保证配色与主界面一致（否则选中行会是系统深蓝）
         self.setStyleSheet(BASE_STYLESHEET)
@@ -48,7 +49,7 @@ class HistoryPanel(QDialog):
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["时间", "方向", "原文", "译文"])
+        self.table.setHorizontalHeaderLabels([tr("时间"), tr("方向"), tr("原文"), tr("译文")])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -75,21 +76,21 @@ class HistoryPanel(QDialog):
         buttons.addWidget(self.count_label)
         buttons.addStretch(1)
 
-        self.retranslate_button = QPushButton("重译此条")
+        self.retranslate_button = QPushButton(tr("重译此条"))
         self.retranslate_button.setEnabled(False)
         self.retranslate_button.clicked.connect(self._on_retranslate)
         buttons.addWidget(self.retranslate_button)
 
-        self.copy_button = QPushButton("复制译文")
+        self.copy_button = QPushButton(tr("复制译文"))
         self.copy_button.setEnabled(False)
         self.copy_button.clicked.connect(self._on_copy)
         buttons.addWidget(self.copy_button)
 
-        self.clear_button = QPushButton("清空历史")
+        self.clear_button = QPushButton(tr("清空历史"))
         self.clear_button.clicked.connect(self._on_clear)
         buttons.addWidget(self.clear_button)
 
-        close_button = QPushButton("关闭")
+        close_button = QPushButton(tr("关闭"))
         close_button.clicked.connect(self.hide)
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
@@ -112,7 +113,7 @@ class HistoryPanel(QDialog):
                 item = QTableWidgetItem(text)
                 item.setToolTip(text)
                 self.table.setItem(row, column, item)
-        self.count_label.setText(f"共 {len(self._entries)} 条")
+        self.count_label.setText(trn("共 {count} 条", count=len(self._entries)))
         if self._entries:
             self.table.selectRow(0)
             self._on_select()  # 立即填充详情，不依赖选中变化信号
@@ -133,11 +134,17 @@ class HistoryPanel(QDialog):
         if entry is None:
             return
         self.detail.setPlainText(
-            f"时间：{entry.time_text}\n"
-            f"方向：{entry.source_lang} → {entry.target_lang}\n"
-            f"引擎：{entry.provider or '—'}\n"
-            f"耗时：{entry.elapsed:.2f}s\n"
-            f"\n【原文】\n{entry.original}\n\n【译文】\n{entry.translation}"
+            trn(
+                "时间：{time}\n方向：{source} → {target}\n引擎：{engine}\n耗时：{seconds}s\n\n"
+                "【原文】\n{original}\n\n【译文】\n{translation}",
+                time=entry.time_text,
+                source=entry.source_lang,
+                target=entry.target_lang,
+                engine=entry.provider or "—",
+                seconds=f"{entry.elapsed:.2f}",
+                original=entry.original,
+                translation=entry.translation,
+            )
         )
         self.retranslate_button.setEnabled(True)
         self.copy_button.setEnabled(bool(entry.translation))
@@ -157,8 +164,8 @@ class HistoryPanel(QDialog):
             return
         answer = QMessageBox.question(
             self,
-            "清空历史",
-            f"确定要删除全部 {len(self._entries)} 条历史记录吗？",
+            tr("清空历史"),
+            trn("确定要删除全部 {count} 条历史记录吗？", count=len(self._entries)),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )

@@ -44,6 +44,14 @@ from ..config import (
 from ..hotkey import format_hotkey
 from ..languages import LANGUAGES, SUPPORTED, label as lang_label
 from .hotkey_edit import HotkeyEdit
+from .i18n import (
+    UI_LANGUAGES,
+    app_title,
+    key_of as _key_of,
+    language_display_name,
+    tr,
+    trn,
+)
 from .theme import (
     ACCENT,
     ACCENT_DARK,
@@ -103,9 +111,26 @@ QListWidget {{ background: {WHITE}; color: {TEXT}; border: 1px solid {BORDER_SOF
 """
 
 
+#: 侧栏导航项（翻译键，顺序即页面顺序）
+_SIDEBAR_KEYS = ("语言", "快捷键", "识别（OCR）", "翻译", "界面")
+
+#: OCR 引擎下拉项（代码, 翻译键）
+_OCR_KEYS = (("rapidocr", "RapidOCR（本地离线，中简/中繁/英）"),)
+
+#: 翻译后端列表项（代码, 翻译键），顺序会被用户调整，这里只定义可选集合
+_ENGINE_KEYS = (
+    ("youdao", "有道翻译（最快，无需 Key）"),
+    ("mymemory", "MyMemory（免费额度，较稳定）"),
+    ("bing", "Bing 翻译（无需 Key，需先取令牌）"),
+    ("google", "Google 免费端点（部分网络不可达）"),
+)
+
+
 class MainWindow(QDialog):
     """设置主窗口。只负责收集与展示配置，具体生效由控制器完成。"""
 
+    #: 用户切换了界面语言（参数为语言代码）
+    ui_language_changed = Signal(str)
     #: 语言发生变化（保存后由控制器应用）
     languages_changed = Signal()
     #: 热键发生变化
@@ -135,10 +160,10 @@ class MainWindow(QDialog):
         self.config = config
         self._hotkey_error = ""
 
-        self.setWindowTitle(f"{APP_TITLE} · 设置")
+        self.setWindowTitle(f"{app_title()} · {tr('设置')}")
         self.setStyleSheet(_STYLE)
-        self.resize(860, 600)
-        self.setMinimumSize(720, 480)
+        self.resize(960, 660)
+        self.setMinimumSize(820, 520)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -161,25 +186,31 @@ class MainWindow(QDialog):
     def _build_sidebar(self) -> QWidget:
         holder = QFrame()
         holder.setObjectName("Sidebar")
-        holder.setFixedWidth(190)
+        # 侧栏只给最小宽度，让它按内容自适应：
+        # 英文主按钮 "Translate a screenshot now" 比中文长得多，
+        # 固定宽度会把它裁成 "late a screenshot now"（左侧被切掉）
+        holder.setMinimumWidth(190)
+        holder.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(holder)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
 
-        title = QLabel(f"{APP_TITLE} v{APP_VERSION}")
+        title = QLabel(f"{app_title()} v{APP_VERSION}")
         title.setObjectName("SidebarTitle")
         layout.addWidget(title)
 
         self._sidebar = QListWidget()
         self._sidebar.setObjectName("SidebarList")
-        for text in ("语言", "快捷键", "识别（OCR）", "翻译", "界面"):
-            self._sidebar.addItem(text)
+        for key in _SIDEBAR_KEYS:
+            self._sidebar.addItem(tr(key))
         self._sidebar.currentRowChanged.connect(self._on_page_changed)
         layout.addWidget(self._sidebar, 1)
 
-        capture = QPushButton("开始截图翻译")
+        capture = QPushButton(tr("开始截图翻译"))
+        capture.setProperty("_i18n", "开始截图翻译")
+        capture.setProperty("_i18n", "开始截图翻译")
         capture.setObjectName("Primary")
-        capture.setToolTip("立即进入框选模式（与全局热键等效）")
+        capture.setToolTip(tr("立即进入框选模式（与全局热键等效）"))
         capture.clicked.connect(self.capture_requested.emit)
         layout.addWidget(capture)
 
@@ -212,11 +243,14 @@ class MainWindow(QDialog):
 
         heading = QLabel(title)
         heading.setObjectName("PageTitle")
+        # 记下翻译键，切换界面语言时 retranslate() 会据此重写文案
+        heading.setProperty("_i18n", _key_of(title))
         layout.addWidget(heading)
         if desc:
             detail = QLabel(desc)
             detail.setObjectName("PageDesc")
             detail.setWordWrap(True)
+            detail.setProperty("_i18n", _key_of(desc))
             layout.addWidget(detail)
         for child in children:
             layout.addWidget(child)
@@ -228,40 +262,188 @@ class MainWindow(QDialog):
             self._stack.setCurrentIndex(row)
 
     # ------------------------------------------------------------------
+    # 界面语言
+    # ------------------------------------------------------------------
+    def retranslate(self) -> None:
+        """按当前 :mod:`fanyi.ui.i18n` 语言刷新界面上所有文案。
+
+        实现方式：控件创建时把"翻译键"存在动态属性 ``_i18n`` 上，
+        这里统一遍历刷新，而不是重建窗口。
+
+        为什么不用"销毁重建"：重建会丢掉窗口位置、当前页签、正在录制的
+        热键状态，还要处理旧窗口的销毁时机，反而更容易出问题。
+        遍历刷新把复杂度限制在"控件自己知道怎么写文案"这一件事上。
+
+        数量/语言名这类动态内容由各自的方法负责（``_rebuild_language_items``、
+        ``refresh_status``），它们不依赖 ``_i18n`` 属性。
+        """
+        from PySide6.QtWidgets import (
+            QAbstractButton,
+            QComboBox,
+            QGroupBox,
+            QLabel,
+            QLineEdit,
+            QPlainTextEdit,
+        )
+
+        for widget in self.findChildren(QWidget):
+            key = widget.property("_i18n")
+            if not key:
+                continue
+            text = tr(key)
+            if isinstance(widget, QGroupBox):
+                widget.setTitle(text)
+            elif isinstance(widget, QAbstractButton):
+                widget.setText(text)
+            elif isinstance(widget, QLabel):
+                widget.setText(text)
+            elif isinstance(widget, (QLineEdit, QPlainTextEdit)):
+                widget.setPlaceholderText(text)
+
+        self.setWindowTitle(f"{app_title()} · {tr('设置')}")
+        self._sidebar.clear()
+        for key in _SIDEBAR_KEYS:
+            self._sidebar.addItem(tr(key))
+
+        self._rebuild_language_items()
+        self._retranslate_combo_items()
+
+        # 录制的提示文字与状态栏是动态生成的，单独刷一遍
+        for editor in (self.capture_hotkey, self.repeat_hotkey):
+            retranslate = getattr(editor, "retranslate", None)
+            if callable(retranslate):
+                retranslate()
+        self._rebuild_engine_items()
+        self.refresh_status()
+
+    def _rebuild_language_items(self) -> None:
+        """语言下拉项的文案跟随界面语言。"""
+        for combo, include_auto in ((self.source_combo, True), (self.target_combo, False)):
+            current = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            if include_auto:
+                combo.addItem(tr("自动检测"), "auto")
+            for code in SUPPORTED:
+                combo.addItem(f"{lang_label(code)}（{_english_name(code)}）", code)
+            combo.blockSignals(False)
+            _select_data(combo, current)
+
+        current_ui = self.ui_language_combo.currentData()
+        self.ui_language_combo.blockSignals(True)
+        self.ui_language_combo.clear()
+        for code in UI_LANGUAGES:
+            self.ui_language_combo.addItem(language_display_name(code), code)
+        self.ui_language_combo.blockSignals(False)
+        _select_data(self.ui_language_combo, current_ui)
+
+        # 常用目标语言的快捷按钮
+        for button in self.quick_target_buttons:
+            code = button.property("_lang_code")
+            if code:
+                button.setText(lang_label(code))
+
+    def _rebuild_engine_items(self) -> None:
+        """翻译后端列表：勾选状态与顺序保留，只换文案。"""
+        states = []
+        for row in range(self.engine_list.count()):
+            item = self.engine_list.item(row)
+            states.append((item.data(Qt.ItemDataRole.UserRole), item.checkState()))
+        order = [code for code, _ in states]
+        check = dict(states)
+
+        self.engine_list.blockSignals(True)
+        self.engine_list.clear()
+        for code, label_key in _ENGINE_KEYS:
+            item = QListWidgetItem(tr(label_key))
+            item.setData(Qt.ItemDataRole.UserRole, code)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(check.get(code, Qt.CheckState.Unchecked))
+            self.engine_list.addItem(item)
+        self.engine_list.blockSignals(False)
+
+        # 按原顺序重排
+        for target_row, code in enumerate(order):
+            for row in range(self.engine_list.count()):
+                if self.engine_list.item(row).data(Qt.ItemDataRole.UserRole) == code:
+                    if row != target_row:
+                        self.engine_list.insertItem(target_row, self.engine_list.takeItem(row))
+                    break
+
+    def _retranslate_combo_items(self) -> None:
+        """OCR 引擎下拉：文案来自配置常量，这里按界面语言重建。"""
+        current = self.ocr_combo.currentData()
+        self.ocr_combo.blockSignals(True)
+        self.ocr_combo.clear()
+        for code, label_key in _OCR_KEYS:
+            self.ocr_combo.addItem(tr(label_key), code)
+        self.ocr_combo.blockSignals(False)
+        _select_data(self.ocr_combo, current)
+
+    # ------------------------------------------------------------------
     # 语言页
     # ------------------------------------------------------------------
     def _build_language_page(self) -> QWidget:
-        box = QGroupBox("翻译语言")
+        # --- 界面语言（与翻译语言分开，互不影响）---
+        ui_box = QGroupBox(tr("界面语言"))
+        ui_box.setProperty("_i18n", "界面语言")
+        ui_form = QVBoxLayout(ui_box)
+        ui_form.setSpacing(8)
+
+        self.ui_language_combo = QComboBox()
+        for code in UI_LANGUAGES:
+            self.ui_language_combo.addItem(language_display_name(code), code)
+        _select_data(self.ui_language_combo, self.config.ui_language)
+        ui_form.addLayout(
+            _row(
+                tr("界面语言"),
+                self.ui_language_combo,
+                tr("界面显示语言，切换后立即生效"),
+            )
+        )
+        self.ui_language_combo.currentIndexChanged.connect(self._emit_ui_language)
+
+        box = QGroupBox(tr("翻译语言"))
+        box.setProperty("_i18n", "翻译语言")
         form = QVBoxLayout(box)
         form.setSpacing(8)
 
         self.source_combo = QComboBox()
-        self.source_combo.addItem("自动检测", "auto")
+        self.source_combo.addItem(tr("自动检测"), "auto")
         for code in SUPPORTED:
             self.source_combo.addItem(f"{lang_label(code)}（{_english_name(code)}）", code)
         _select_data(self.source_combo, self.config.source_lang)
-        form.addLayout(_row("源语言", self.source_combo, "「自动检测」由翻译引擎判断原文语言"))
+        form.addLayout(_row(tr("源语言"), self.source_combo, tr("「自动检测」由翻译引擎判断原文语言")))
 
         self.target_combo = QComboBox()
         for code in SUPPORTED:
             self.target_combo.addItem(f"{lang_label(code)}（{_english_name(code)}）", code)
         _select_data(self.target_combo, self.config.target_lang)
-        form.addLayout(_row("目标语言", self.target_combo, "译文输出成这个语言"))
+        form.addLayout(_row(tr("目标语言"), self.target_combo, tr("译文输出成这个语言")))
 
-        self.swap_button = QPushButton("⇄ 互换源语言与目标语言")
+        self.swap_button = QPushButton(tr("⇄ 互换源语言与目标语言"))
+        self.swap_button.setProperty("_i18n", "⇄ 互换源语言与目标语言")
+        self.swap_button.setProperty("_i18n", "⇄ 互换源语言与目标语言")
         self.swap_button.clicked.connect(self._on_swap)
         form.addWidget(self.swap_button)
 
         quick = QHBoxLayout()
-        quick.addWidget(QLabel("常用目标："))
+        _label = QLabel(tr("常用目标："))
+        _label.setProperty("_i18n", "常用目标：")
+        quick.addWidget(_label)
+        # 记住这些按钮：切换界面语言时语言名也要跟着换
+        self.quick_target_buttons: list = []
         for code in SUPPORTED:
             button = QPushButton(lang_label(code))
+            button.setProperty("_lang_code", code)
             button.clicked.connect(lambda _=False, c=code: self._set_target(c))
             quick.addWidget(button)
+            self.quick_target_buttons.append(button)
         quick.addStretch(1)
         form.addLayout(quick)
 
-        self.normalize_check = QCheckBox("自动统一简繁字形（目标为中文时把译文校正为简体/繁体）")
+        self.normalize_check = QCheckBox(tr("自动统一简繁字形（目标为中文时把译文校正为简体/繁体）"))
+        self.normalize_check.setProperty("_i18n", "自动统一简繁字形（目标为中文时把译文校正为简体/繁体）")
         self.normalize_check.setChecked(self.config.normalize_script)
         form.addWidget(self.normalize_check)
 
@@ -270,14 +452,20 @@ class MainWindow(QDialog):
         self.normalize_check.toggled.connect(self._emit_languages)
 
         return self._page(
+            ui_box,
             box,
             _tip(
-                "语言的改动立即生效。已经显示的译文会按新目标语言自动重译一次；\n"
-                "也可以随时在托盘菜单或结果窗口右上角切换目标语言。"
+                tr(
+                    "语言的改动立即生效。已经显示的译文会按新目标语言自动重译一次；\n"
+                    "也可以随时在托盘菜单或结果窗口右上角切换目标语言。"
+                )
             ),
-            title="语言",
-            desc="决定把屏幕上的文字翻译成哪种语言。支持简体中文、繁体中文、英语互译。",
+            title=tr("语言"),
+            desc=tr("决定把屏幕上的文字翻译成哪种语言。支持简体中文、繁体中文、英语互译。"),
         )
+
+    def _emit_ui_language(self) -> None:
+        self.ui_language_changed.emit(self.ui_language_combo.currentData())
 
     def _set_target(self, code: str) -> None:
         _select_data(self.target_combo, code)
@@ -288,9 +476,11 @@ class MainWindow(QDialog):
         if source == "auto":
             QMessageBox.information(
                 self,
-                "无法互换",
-                "源语言是「自动检测」时没有可互换的语言。\n"
-                "请先把源语言指定为具体语言。",
+                tr("无法互换"),
+                tr(
+                    "源语言是「自动检测」时没有可互换的语言。\n"
+                    "请先把源语言指定为具体语言。"
+                ),
             )
             return
         _select_data(self.source_combo, target)
@@ -305,11 +495,13 @@ class MainWindow(QDialog):
     # 快捷键页
     # ------------------------------------------------------------------
     def _build_hotkey_page(self) -> QWidget:
-        box = QGroupBox("全局快捷键")
+        box = QGroupBox(tr("全局快捷键"))
+        box.setProperty("_i18n", "全局快捷键")
         form = QVBoxLayout(box)
         form.setSpacing(8)
 
-        self.hotkey_enabled_check = QCheckBox("启用全局快捷键")
+        self.hotkey_enabled_check = QCheckBox(tr("启用全局快捷键"))
+        self.hotkey_enabled_check.setProperty("_i18n", "启用全局快捷键")
         self.hotkey_enabled_check.setChecked(self.config.hotkey_enabled)
         form.addWidget(self.hotkey_enabled_check)
 
@@ -318,22 +510,23 @@ class MainWindow(QDialog):
         self.capture_hotkey.recording_started.connect(self._on_record_started)
         self.capture_hotkey.recording_stopped.connect(self._on_record_stopped)
         form.addLayout(
-            _wide_row("截图翻译", self.capture_hotkey, "唤出框选层，框住哪里就翻译哪里")
+            _stacked_row(tr("截图翻译"), self.capture_hotkey, tr("唤出框选层，框住哪里就翻译哪里"))
         )
 
-        self.repeat_hotkey = HotkeyEdit(self.config.repeat_hotkey, placeholder="不设置")
+        self.repeat_hotkey = HotkeyEdit(self.config.repeat_hotkey, placeholder=tr("不设置"))
         self.repeat_hotkey.hotkey_changed.connect(self._on_repeat_hotkey)
         self.repeat_hotkey.recording_started.connect(self._on_record_started)
         self.repeat_hotkey.recording_stopped.connect(self._on_record_stopped)
         form.addLayout(
-            _wide_row(
-                "重译上次区域",
+            _stacked_row(
+                tr("重译上次区域"),
                 self.repeat_hotkey,
-                "不重新截图，直接把上一次框选的区域再翻译一次",
+                tr("不重新截图，直接把上一次框选的区域再翻译一次"),
             )
         )
 
-        self.hotkey_apply_button = QPushButton("重新注册快捷键")
+        self.hotkey_apply_button = QPushButton(tr("重新注册快捷键"))
+        self.hotkey_apply_button.setProperty("_i18n", "重新注册快捷键")
         self.hotkey_apply_button.clicked.connect(self.reapply_hotkeys_requested.emit)
         form.addWidget(self.hotkey_apply_button)
 
@@ -342,15 +535,17 @@ class MainWindow(QDialog):
         return self._page(
             box,
             _tip(
-                "怎么设置：点「录制」→ 直接按下想要的组合键（例如 Ctrl+Alt+Z）。\n"
-                "录制期间会临时停用全局热键，否则按键会被系统钩子先吃掉，界面录不到。\n"
-                "组合必须包含 Ctrl / Alt / Shift / Win 中至少一个修饰键。\n"
-                "按 Esc 取消录制；点「默认」恢复出厂快捷键。\n\n"
-                "若提示注册失败：多半是组合被别的软件占用，换一个即可；\n"
-                "少数机器需要以管理员身份运行才能安装键盘钩子。"
+                tr(
+                    "怎么设置：点「录制」→ 直接按下想要的组合键（例如 Ctrl+Alt+Z）。\n"
+                    "录制期间会临时停用全局热键，否则按键会被系统钩子先吃掉，界面录不到。\n"
+                    "组合必须包含 Ctrl / Alt / Shift / Win 中至少一个修饰键。\n"
+                    "按 Esc 取消录制；点「默认」恢复出厂快捷键。\n\n"
+                    "若提示注册失败：多半是组合被别的软件占用，换一个即可；\n"
+                    "少数机器需要以管理员身份运行才能安装键盘钩子。"
+                )
             ),
-            title="快捷键",
-            desc="录制你习惯的按键组合。改动会立即重新注册，无需重启程序。",
+            title=tr("快捷键"),
+            desc=tr("录制你习惯的按键组合。改动会立即重新注册，无需重启程序。"),
         )
 
     def _on_record_started(self) -> None:
@@ -387,15 +582,17 @@ class MainWindow(QDialog):
     # OCR 页
     # ------------------------------------------------------------------
     def _build_ocr_page(self) -> QWidget:
-        box = QGroupBox("识别引擎")
+        box = QGroupBox(tr("识别引擎"))
+        box.setProperty("_i18n", "识别引擎")
         form = QVBoxLayout(box)
         form.setSpacing(8)
 
         self.ocr_combo = QComboBox()
-        for code, label in OCR_ENGINES:
-            self.ocr_combo.addItem(label, code)
+        # 条目文案用常量表的翻译键，_retranslate_combo_items() 依赖同一张表
+        for code, label_key in _OCR_KEYS:
+            self.ocr_combo.addItem(tr(label_key), code)
         _select_data(self.ocr_combo, self.config.ocr_engine)
-        form.addLayout(_row("OCR 引擎", self.ocr_combo, "本地离线，不联网，不上传屏幕内容"))
+        form.addLayout(_row(tr("OCR 引擎"), self.ocr_combo, tr("本地离线，不联网，不上传屏幕内容")))
 
         self.ocr_scale_spin = QDoubleSpinBox()
         self.ocr_scale_spin.setRange(1.0, 3.0)
@@ -403,7 +600,7 @@ class MainWindow(QDialog):
         self.ocr_scale_spin.setDecimals(1)
         self.ocr_scale_spin.setValue(float(self.config.ocr_scale or 1.0))
         form.addLayout(
-            _row("识别前放大倍数", self.ocr_scale_spin, "字太小识别不准时调到 1.5 ~ 2.0")
+            _row(tr("识别前放大倍数"), self.ocr_scale_spin, tr("字太小识别不准时调到 1.5 ~ 2.0"))
         )
 
         self.ocr_confidence_spin = QDoubleSpinBox()
@@ -412,7 +609,7 @@ class MainWindow(QDialog):
         self.ocr_confidence_spin.setDecimals(2)
         self.ocr_confidence_spin.setValue(float(self.config.ocr_min_confidence))
         form.addLayout(
-            _row("最低置信度", self.ocr_confidence_spin, "低于该值的识别结果会被丢弃")
+            _row(tr("最低置信度"), self.ocr_confidence_spin, tr("低于该值的识别结果会被丢弃"))
         )
 
         self.ocr_scale_spin.valueChanged.connect(self._emit_ocr)
@@ -422,11 +619,13 @@ class MainWindow(QDialog):
         return self._page(
             box,
             _tip(
-                "RapidOCR 模型在程序启动后会在后台加载（约 1~3 秒），之后常驻内存，\n"
-                "单次识别通常在 1 秒内完成，全程不联网。"
+                tr(
+                    "RapidOCR 模型在程序启动后会在后台加载（约 1~3 秒），之后常驻内存，\n"
+                    "单次识别通常在 1 秒内完成，全程不联网。"
+                )
             ),
-            title="识别（OCR）",
-            desc="屏幕文字先由本地引擎识别成文本，再送去翻译。",
+            title=tr("识别（OCR）"),
+            desc=tr("屏幕文字先由本地引擎识别成文本，再送去翻译。"),
         )
 
     def _emit_ocr(self) -> None:
@@ -436,13 +635,15 @@ class MainWindow(QDialog):
     # 翻译页
     # ------------------------------------------------------------------
     def _build_translate_page(self) -> QWidget:
-        box = QGroupBox("后端优先级（自上而下依次尝试，失败自动切换）")
+        box = QGroupBox(tr("后端优先级（自上而下依次尝试，失败自动切换）"))
+        box.setProperty("_i18n", "后端优先级（自上而下依次尝试，失败自动切换）")
         layout = QVBoxLayout(box)
 
         self.engine_list = QListWidget()
         self.engine_list.setFixedHeight(140)
-        for code, label in TRANSLATE_ENGINES:
-            item = QListWidgetItem(label)
+        # 条目文案用常量表的翻译键，_rebuild_engine_items() 依赖同一张表
+        for code, label_key in _ENGINE_KEYS:
+            item = QListWidgetItem(tr(label_key))
             item.setData(Qt.ItemDataRole.UserRole, code)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(
@@ -455,9 +656,11 @@ class MainWindow(QDialog):
         layout.addWidget(self.engine_list)
 
         buttons = QHBoxLayout()
-        up = QPushButton("上移")
+        up = QPushButton(tr("上移"))
+        up.setProperty("_i18n", "上移")
         up.clicked.connect(lambda: self._move_engine(-1))
-        down = QPushButton("下移")
+        down = QPushButton(tr("下移"))
+        down.setProperty("_i18n", "下移")
         down.clicked.connect(lambda: self._move_engine(1))
         buttons.addWidget(up)
         buttons.addWidget(down)
@@ -468,18 +671,20 @@ class MainWindow(QDialog):
         self.timeout_spin.setRange(2.0, 30.0)
         self.timeout_spin.setSingleStep(1.0)
         self.timeout_spin.setDecimals(1)
-        self.timeout_spin.setSuffix(" 秒")
+        self.timeout_spin.setSuffix(tr(" 秒"))
         self.timeout_spin.setValue(float(self.config.request_timeout))
         self.timeout_spin.valueChanged.connect(self._emit_translate)
-        layout.addLayout(_row("单次请求超时", self.timeout_spin, "网络慢时可适当调大"))
+        layout.addLayout(_row(tr("单次请求超时"), self.timeout_spin, tr("网络慢时可适当调大")))
 
-        self.cache_check = QCheckBox("启用翻译缓存（相同内容不再请求网络）")
+        self.cache_check = QCheckBox(tr("启用翻译缓存（相同内容不再请求网络）"))
+        self.cache_check.setProperty("_i18n", "启用翻译缓存（相同内容不再请求网络）")
         self.cache_check.setChecked(self.config.cache_enabled)
         self.cache_check.toggled.connect(self._emit_translate)
         layout.addWidget(self.cache_check)
 
         cache_row = QHBoxLayout()
-        clear_cache = QPushButton("清空翻译缓存")
+        clear_cache = QPushButton(tr("清空翻译缓存"))
+        clear_cache.setProperty("_i18n", "清空翻译缓存")
         clear_cache.clicked.connect(self.cache_clear_requested.emit)
         cache_row.addWidget(clear_cache)
         cache_row.addStretch(1)
@@ -488,13 +693,15 @@ class MainWindow(QDialog):
         return self._page(
             box,
             _tip(
-                "所有后端都是免费公开接口，不需要 API Key。\n"
-                "被限流的后端会自动进入冷却（默认 45 秒）并切换到下一个，\n"
-                "因此把响应快的排在上面体验最好。\n"
-                "想测自己网络下哪个最快：运行 scripts\\probe_engines.py。"
+                tr(
+                    "所有后端都是免费公开接口，不需要 API Key。\n"
+                    "被限流的后端会自动进入冷却（默认 45 秒）并切换到下一个，\n"
+                    "因此把响应快的排在上面体验最好。\n"
+                    "想测自己网络下哪个最快：运行 scripts\\probe_engines.py。"
+                )
             ),
-            title="翻译",
-            desc="译文由在线免费接口生成。任何一个后端不可用都不会让翻译整个失败。",
+            title=tr("翻译"),
+            desc=tr("译文由在线免费接口生成。任何一个后端不可用都不会让翻译整个失败。"),
         )
 
     def _move_engine(self, delta: int) -> None:
@@ -516,18 +723,22 @@ class MainWindow(QDialog):
     # 界面页
     # ------------------------------------------------------------------
     def _build_appearance_page(self) -> QWidget:
-        box = QGroupBox("结果窗口")
+        box = QGroupBox(tr("结果窗口"))
+        box.setProperty("_i18n", "结果窗口")
         form = QVBoxLayout(box)
 
-        self.on_top_check = QCheckBox("结果窗口置顶显示")
+        self.on_top_check = QCheckBox(tr("结果窗口置顶显示"))
+        self.on_top_check.setProperty("_i18n", "结果窗口置顶显示")
         self.on_top_check.setChecked(self.config.result_always_on_top)
         form.addWidget(self.on_top_check)
 
-        self.show_original_check = QCheckBox("显示原文区域")
+        self.show_original_check = QCheckBox(tr("显示原文区域"))
+        self.show_original_check.setProperty("_i18n", "显示原文区域")
         self.show_original_check.setChecked(self.config.show_original)
         form.addWidget(self.show_original_check)
 
-        self.auto_copy_check = QCheckBox("翻译完成后自动复制译文到剪贴板")
+        self.auto_copy_check = QCheckBox(tr("翻译完成后自动复制译文到剪贴板"))
+        self.auto_copy_check.setProperty("_i18n", "翻译完成后自动复制译文到剪贴板")
         self.auto_copy_check.setChecked(self.config.result_auto_copy)
         form.addWidget(self.auto_copy_check)
 
@@ -535,27 +746,30 @@ class MainWindow(QDialog):
         self.font_spin.setRange(8, 28)
         self.font_spin.setValue(int(self.config.result_font_size))
         self.font_spin.setSuffix(" pt")
-        form.addLayout(_row("字号", self.font_spin, "译文字号会比原文大 2pt"))
+        form.addLayout(_row(tr("字号"), self.font_spin, tr("译文字号会比原文大 2pt")))
 
         for widget in (self.on_top_check, self.show_original_check, self.auto_copy_check):
             widget.toggled.connect(self.appearance_changed.emit)
         self.font_spin.valueChanged.connect(self.appearance_changed.emit)
 
-        data_box = QGroupBox("数据与历史")
+        data_box = QGroupBox(tr("数据与历史"))
+        data_box.setProperty("_i18n", "数据与历史")
         data_layout = QVBoxLayout(data_box)
 
         self.history_spin = QSpinBox()
         self.history_spin.setRange(20, 2000)
         self.history_spin.setValue(int(self.config.history_limit))
-        self.history_spin.setSuffix(" 条")
+        self.history_spin.setSuffix(tr(" 条"))
         self.history_spin.valueChanged.connect(self.appearance_changed.emit)
-        data_layout.addLayout(_row("历史记录上限", self.history_spin, "超出后自动丢弃最旧的记录"))
+        data_layout.addLayout(_row(tr("历史记录上限"), self.history_spin, tr("超出后自动丢弃最旧的记录")))
 
         row = QHBoxLayout()
-        history_button = QPushButton("查看翻译历史")
+        history_button = QPushButton(tr("查看翻译历史"))
+        history_button.setProperty("_i18n", "查看翻译历史")
         history_button.clicked.connect(self.history_requested.emit)
         row.addWidget(history_button)
-        path_button = QPushButton("打开配置文件目录")
+        path_button = QPushButton(tr("打开配置文件目录"))
+        path_button.setProperty("_i18n", "打开配置文件目录")
         path_button.clicked.connect(self.open_config_dir_requested.emit)
         row.addWidget(path_button)
         row.addStretch(1)
@@ -564,9 +778,9 @@ class MainWindow(QDialog):
         return self._page(
             box,
             data_box,
-            _tip(f"配置文件位置：{config_path()}"),
-            title="界面",
-            desc="调整结果窗口的显示方式与本地数据规模。",
+            _tip(trn("配置文件位置：{path}", path=config_path())),
+            title=tr("界面"),
+            desc=tr("调整结果窗口的显示方式与本地数据规模。"),
         )
 
     # ------------------------------------------------------------------
@@ -585,7 +799,9 @@ class MainWindow(QDialog):
         self.status_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.status_label, 1)
 
-        self.close_button = QPushButton("关闭窗口")
+        self.close_button = QPushButton(tr("关闭窗口"))
+        self.close_button.setProperty("_i18n", "关闭窗口")
+        self.close_button.setProperty("_i18n", "关闭窗口")
         self.close_button.clicked.connect(self.hide)
         layout.addWidget(self.close_button)
         return bar
@@ -597,17 +813,21 @@ class MainWindow(QDialog):
         self.refresh_status()
 
     def refresh_status(self) -> None:
-        parts = [f"目标语言：{lang_label(self.target_combo.currentData())}"]
+        parts = [
+            trn("目标语言：{language}", language=lang_label(self.target_combo.currentData()))
+        ]
         if self.config.hotkey_enabled:
             if self._hotkey_error:
-                parts.append(f"⚠ 热键未生效：{self._hotkey_error}")
+                parts.append(trn("⚠ 热键未生效：{reason}", reason=self._hotkey_error))
             else:
                 capture = self.capture_hotkey.hotkey
                 parts.append(
-                    f"截图热键：{format_hotkey(capture)}" if capture else "截图热键：未设置"
+                    trn("截图热键：{hotkey}", hotkey=format_hotkey(capture))
+                    if capture
+                    else tr("截图热键：未设置")
                 )
         else:
-            parts.append("全局热键已停用")
+            parts.append(tr("全局热键已停用"))
         self.status_label.setText("　·　".join(parts))
 
     # ------------------------------------------------------------------
@@ -616,6 +836,8 @@ class MainWindow(QDialog):
     def collect(self) -> Config:
         """把界面上的值写回配置对象（不做落盘，落盘由控制器负责）。"""
         config = self.config
+        # 界面语言不在 collect 里改：它需要立刻重建界面，
+        # 由 ui_language_changed 信号单独处理，避免被 collect 覆盖回去
         config.source_lang = self.source_combo.currentData()
         config.target_lang = self.target_combo.currentData()
         config.normalize_script = self.normalize_check.isChecked()
@@ -687,28 +909,53 @@ def _select_data(combo: QComboBox, value: str) -> None:
 def _row(label: str, widget: QWidget, hint: str = "") -> QHBoxLayout:
     """一行设置项：左标签、中控件、右灰色说明。
 
-    说明文字会给一个较小的最小宽度：它一旦太宽就会把中间的控件挤扁
-    （快捷键录入框曾经被挤到只剩一个字母宽）。需要完整宽度的控件
-    请用 :func:`_wide_row`。
+    这里刻意**不设最小宽度**：给控件和说明文字设最小值会让三者的需求宽度
+    之和超过窗口宽度，Qt 只能按比例裁掉一部分，表现为文字被切掉半边
+    （快捷键录入框、英文主按钮都踩过这个坑）。改为让布局自己分配空间。
     """
     row = QHBoxLayout()
     row.setSpacing(10)
 
     name = QLabel(label)
-    name.setMinimumWidth(104)
+    name.setProperty("_i18n", _key_of(label))
     name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     row.addWidget(name)
 
-    widget.setMinimumWidth(180)
     row.addWidget(widget, 2)
 
     if hint:
         note = QLabel(hint)
         note.setObjectName("PageDesc")
         note.setWordWrap(True)
-        note.setMinimumWidth(150)
+        note.setProperty("_i18n", _key_of(hint))
         row.addWidget(note, 1)
     return row
+
+
+def _stacked_row(label: str, widget: QWidget, hint: str = "") -> QVBoxLayout:
+    """整行布局：标签在上、控件独占下一行、说明再下一行。
+
+    给快捷键录入框这类"内部由多个控件拼成"的部件用。标签放在控件左侧
+    会占掉约 110px，加上说明文字，录入框拿到的宽度就不足以容纳
+    （显示框 + 录制 + 清除 + 默认）四个控件的最小宽度，Qt 只能裁掉一部分，
+    表现为按钮文字被切成 "ecord"/"efault"。这里把标签也挪到上方，
+    让录入框独占整行宽度。
+    """
+    column = QVBoxLayout()
+    column.setSpacing(4)
+
+    name = QLabel(label)
+    name.setProperty("_i18n", _key_of(label))
+    column.addWidget(name)
+    column.addWidget(widget)
+
+    if hint:
+        note = QLabel(hint)
+        note.setObjectName("PageDesc")
+        note.setWordWrap(True)
+        note.setProperty("_i18n", _key_of(hint))
+        column.addWidget(note)
+    return column
 
 
 def _wide_row(label: str, widget: QWidget, hint: str = "") -> QVBoxLayout:
@@ -722,7 +969,7 @@ def _wide_row(label: str, widget: QWidget, hint: str = "") -> QVBoxLayout:
     top = QHBoxLayout()
     top.setSpacing(10)
     name = QLabel(label)
-    name.setMinimumWidth(104)
+    name.setProperty("_i18n", _key_of(label))
     name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     top.addWidget(name)
     top.addWidget(widget, 1)
@@ -733,6 +980,7 @@ def _wide_row(label: str, widget: QWidget, hint: str = "") -> QVBoxLayout:
         note.setObjectName("PageDesc")
         note.setWordWrap(True)
         note.setContentsMargins(114, 0, 0, 0)
+        note.setProperty("_i18n", _key_of(hint))
         column.addWidget(note)
     return column
 
@@ -741,6 +989,7 @@ def _tip(text: str) -> QWidget:
     label = QLabel(text)
     label.setObjectName("TipBox")
     label.setWordWrap(True)
+    label.setProperty("_i18n", _key_of(text))
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
     return label
 

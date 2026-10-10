@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ..config import DEFAULT_HOTKEY
 from ..hotkey import format_hotkey, is_valid_hotkey, normalize_hotkey
+from .i18n import tr, trn
 
 #: Qt 键名 → keyboard 库键名（仅列出需要改名的）
 #:
@@ -101,7 +102,7 @@ class HotkeyEdit(QWidget):
     def __init__(
         self,
         hotkey: str = "",
-        placeholder: str = "未设置",
+        placeholder: str = tr("未设置"),
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -114,9 +115,11 @@ class HotkeyEdit(QWidget):
         layout.setSpacing(6)
 
         self.display = QLabel()
-        # 必须够宽：``Ctrl + Alt + Page Up`` 这类组合很长，
-        # 宽度不足时 QLabel 会把文字截断（看起来像乱码或只显示第一个词）
-        self.display.setMinimumWidth(210)
+        # 宽度是权衡的结果：太窄会把 "Ctrl + Alt + Page Up" 截断成 "Ctrl ·"，
+        # 太宽则会把右侧三个按钮挤出可用空间，Qt 只能裁切它们
+        # （表现为按钮文字变成 "ecord"/"efault"）。这里取中间值，
+        # 并让按钮用较小但足够的最小宽度，整体不超出常见窗口宽度。
+        self.display.setMinimumWidth(170)
         self.display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display.setStyleSheet(
             "QLabel { border: 1px solid #D8DEE8; border-radius: 6px;"
@@ -124,20 +127,24 @@ class HotkeyEdit(QWidget):
         )
         layout.addWidget(self.display, 1)
 
-        self.record_button = QPushButton("录制")
+        # 按钮文案会随界面语言变化，宽度按最长的一种（"Record"/"录制"）留够；
+        # 用 setFixedWidth 会让英文按下时被截成 "Reco…"
+        self.record_button = QPushButton(tr("录制"))
         self.record_button.setCheckable(True)
-        self.record_button.setFixedWidth(64)
+        self.record_button.setMinimumWidth(64)
         self.record_button.toggled.connect(self._on_record_toggled)
         layout.addWidget(self.record_button)
 
-        self.clear_button = QPushButton("清除")
-        self.clear_button.setFixedWidth(64)
+        self.clear_button = QPushButton(tr("清除"))
+        self.clear_button.setMinimumWidth(64)
         self.clear_button.clicked.connect(lambda: self.set_hotkey("", emit=True))
         layout.addWidget(self.clear_button)
 
-        self.reset_button = QPushButton("默认")
-        self.reset_button.setFixedWidth(64)
-        self.reset_button.setToolTip(f"恢复默认 {format_hotkey(DEFAULT_HOTKEY)}")
+        self.reset_button = QPushButton(tr("默认"))
+        self.reset_button.setMinimumWidth(64)
+        self.reset_button.setToolTip(
+            trn("恢复默认 {hotkey}", hotkey=format_hotkey(DEFAULT_HOTKEY))
+        )
         self.reset_button.clicked.connect(
             lambda: self.set_hotkey(DEFAULT_HOTKEY, emit=True)
         )
@@ -147,6 +154,18 @@ class HotkeyEdit(QWidget):
         self.hint.setStyleSheet("color: #DC2626;")
         layout.addWidget(self.hint)
 
+        self._refresh()
+
+    # ------------------------------------------------------------------
+    def retranslate(self) -> None:
+        """按当前界面语言刷新按钮与提示文案。"""
+        self.record_button.setText(tr("取消") if self._recording else tr("录制"))
+        self.clear_button.setText(tr("清除"))
+        self.reset_button.setText(tr("默认"))
+        self.reset_button.setToolTip(
+            trn("恢复默认 {hotkey}", hotkey=format_hotkey(DEFAULT_HOTKEY))
+        )
+        self.display.setToolTip(tr("点击「录制」后按下组合键即可录入，也支持直接手输。"))
         self._refresh()
 
     # ------------------------------------------------------------------
@@ -168,7 +187,7 @@ class HotkeyEdit(QWidget):
 
     def _refresh(self) -> None:
         if self._recording:
-            self.display.setText("请按下组合键…")
+            self.display.setText(tr("请按下组合键…"))
             self.display.setStyleSheet(
                 "QLabel { border: 2px solid #2563EB; border-radius: 6px;"
                 " padding: 4px 10px; background: #EFF6FF; color: #1D4ED8;"
@@ -184,7 +203,7 @@ class HotkeyEdit(QWidget):
     # ------------------------------------------------------------------
     def _on_record_toggled(self, checked: bool) -> None:
         self._recording = checked
-        self.record_button.setText("取消" if checked else "录制")
+        self.record_button.setText(tr("取消") if checked else tr("录制"))
         self._refresh()
         if checked:
             self.hint.setText("")
@@ -231,11 +250,11 @@ class HotkeyEdit(QWidget):
         combo = qt_sequence_to_combo(sequence)
 
         if not combo:
-            self.hint.setText("请同时按下 Ctrl / Alt / Shift 之一与一个主键")
+            self.hint.setText(tr("请同时按下 Ctrl / Alt / Shift 之一与一个主键"))
             return
 
         if not is_valid_hotkey(combo):
-            self.hint.setText("需要至少一个修饰键，例如 Ctrl+Alt+Z")
+            self.hint.setText(tr("需要至少一个修饰键，例如 Ctrl+Alt+Z"))
             return
 
         self.hint.setText("")

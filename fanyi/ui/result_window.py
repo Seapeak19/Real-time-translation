@@ -32,6 +32,7 @@ from .theme import (
     TEXT_MUTED,
     WHITE,
 )
+from .i18n import engine_label, tr, trn
 
 #: 译文框里可选的字体族（按可用性依次尝试）
 _FONT_CANDIDATES = ["Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "SimSun"]
@@ -114,7 +115,7 @@ class ResultWindow(QWidget):
 
         self.setObjectName("ResultCard")
         self.setStyleSheet(_STYLE)
-        self.setWindowTitle("翻译结果")
+        self.setWindowTitle(tr("翻译结果"))
         self.resize(QSize(560, 380))
         self.setMinimumSize(QSize(380, 200))
         self._apply_flags()
@@ -162,9 +163,9 @@ class ResultWindow(QWidget):
         header_layout = QHBoxLayout(self.original_header)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(6)
-        self.original_label = QLabel("原文")
+        self.original_label = QLabel(tr("原文"))
         self.original_label.setObjectName("SectionLabel")
-        self.toggle_original_button = QPushButton("收起")
+        self.toggle_original_button = QPushButton(tr("收起"))
         self.toggle_original_button.setFixedHeight(22)
         self.toggle_original_button.clicked.connect(self.toggle_original)
         header_layout.addWidget(self.original_label)
@@ -181,7 +182,7 @@ class ResultWindow(QWidget):
         self.original_text.setObjectName("OriginalText")
         self.original_text.setReadOnly(True)
         self.original_text.setFont(text_font)
-        self.original_text.setPlaceholderText("（未识别到文字）")
+        self.original_text.setPlaceholderText(tr("（未识别到文字）"))
         self.original_text.setMaximumHeight(120)
         self.original_text.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -191,9 +192,9 @@ class ResultWindow(QWidget):
         # --- 译文 ---
         translation_header = QHBoxLayout()
         translation_header.setSpacing(6)
-        self.translation_label = QLabel("译文")
+        self.translation_label = QLabel(tr("译文"))
         self.translation_label.setObjectName("SectionLabel")
-        self.copy_button = QPushButton("复制译文")
+        self.copy_button = QPushButton(tr("复制译文"))
         self.copy_button.setObjectName("PrimaryButton")
         self.copy_button.setFixedHeight(24)
         self.copy_button.clicked.connect(lambda: self.copy_translation())
@@ -207,7 +208,7 @@ class ResultWindow(QWidget):
         big_font = QFont(text_font)
         big_font.setPointSize(font_size + 2)
         self.translation_text.setFont(big_font)
-        self.translation_text.setPlaceholderText("等待结果…")
+        self.translation_text.setPlaceholderText(tr("等待结果…"))
         self.translation_text.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -233,36 +234,36 @@ class ResultWindow(QWidget):
         layout.setContentsMargins(12, 0, 6, 0)
         layout.setSpacing(6)
 
-        self.title_label = QLabel("翻译")
+        self.title_label = QLabel(tr("翻译"))
         self.title_label.setObjectName("TitleText")
         layout.addWidget(self.title_label)
         layout.addStretch(1)
 
-        self.target_button = QPushButton("目标语言")
-        self.target_button.setToolTip("切换目标语言并重新翻译")
+        self.target_button = QPushButton(tr("目标语言"))
+        self.target_button.setToolTip(tr("切换目标语言并重新翻译"))
         self.target_button.clicked.connect(self._cycle_target)
         layout.addWidget(self.target_button)
 
-        self.retranslate_button = QPushButton("重译")
-        self.retranslate_button.setToolTip("对当前原文重新翻译")
+        self.retranslate_button = QPushButton(tr("重译"))
+        self.retranslate_button.setToolTip(tr("对当前原文重新翻译"))
         self.retranslate_button.clicked.connect(self.retranslate_requested.emit)
         layout.addWidget(self.retranslate_button)
 
-        self.pin_button = QPushButton("置顶")
+        self.pin_button = QPushButton(tr("置顶"))
         self.pin_button.setCheckable(True)
         self.pin_button.setChecked(self._pinned)
-        self.pin_button.setToolTip("切换窗口置顶")
+        self.pin_button.setToolTip(tr("切换窗口置顶"))
         self.pin_button.clicked.connect(self.set_pinned)
         layout.addWidget(self.pin_button)
 
-        self.settings_button = QPushButton("设置")
-        self.settings_button.setToolTip("打开设置：快捷键、语言、OCR 与翻译后端")
+        self.settings_button = QPushButton(tr("设置"))
+        self.settings_button.setToolTip(tr("打开设置：快捷键、语言、OCR 与翻译后端"))
         self.settings_button.clicked.connect(self.settings_requested.emit)
         layout.addWidget(self.settings_button)
 
         close_button = QPushButton("✕")
         close_button.setObjectName("CloseButton")
-        close_button.setToolTip("关闭 (Esc)")
+        close_button.setToolTip(tr("关闭 (Esc)"))
         close_button.clicked.connect(self.hide)
         layout.addWidget(close_button)
 
@@ -295,7 +296,7 @@ class ResultWindow(QWidget):
     # ------------------------------------------------------------------
     # 状态切换
     # ------------------------------------------------------------------
-    def show_loading(self, stage: str = "正在识别…") -> None:
+    def show_loading(self, stage: str = tr("正在识别…")) -> None:
         self.status.setText(stage)
         self.translation_text.setPlaceholderText(stage)
         self.copy_button.setEnabled(False)
@@ -320,20 +321,20 @@ class ResultWindow(QWidget):
 
         bits = []
         if provider:
-            bits.append(f"引擎：{provider}")
+            bits.append(trn("引擎：{engine}", engine=engine_label(provider)))
         if from_cache:
-            bits.append("缓存命中")
+            bits.append(tr("缓存命中"))
         if elapsed > 0:
-            bits.append(f"耗时 {elapsed:.2f}s")
+            bits.append(trn("耗时 {seconds}s", seconds=f"{elapsed:.2f}"))
         if original:
-            bits.append(f"原文 {len(original)} 字")
+            bits.append(trn("原文 {count} 字", count=len(original)))
         self.status.setText("　·　".join(bits))
 
     def show_error(self, message: str, original: str = "") -> None:
         if original:
             self.original_text.setPlainText(original)
         self.translation_text.setPlainText("")
-        self.translation_text.setPlaceholderText("翻译失败")
+        self.translation_text.setPlaceholderText(tr("翻译失败"))
         self.status.setText(message)
         self.copy_button.setEnabled(False)
         self.retranslate_button.setEnabled(bool(original))
@@ -350,10 +351,16 @@ class ResultWindow(QWidget):
         self.title_label.setText(
             f"{lang_label(self._source_lang)} → {lang_label(self._target_lang)}"
         )
-        self.target_button.setText(f"目标：{lang_label(self._target_lang)}")
-        self.original_label.setText(f"原文（{lang_label(self._source_lang)}）")
-        self.translation_label.setText(f"译文（{lang_label(self._target_lang)}）")
-        self.translation_text.setPlaceholderText("等待结果…")
+        self.target_button.setText(
+            trn("目标：{language}", language=lang_label(self._target_lang))
+        )
+        self.original_label.setText(
+            trn("原文（{language}）", language=lang_label(self._source_lang))
+        )
+        self.translation_label.setText(
+            trn("译文（{language}）", language=lang_label(self._target_lang))
+        )
+        self.translation_text.setPlaceholderText(tr("等待结果…"))
 
     def _cycle_target(self) -> None:
         from ..languages import SUPPORTED
@@ -375,7 +382,7 @@ class ResultWindow(QWidget):
         if not text:
             return False
         QApplication.clipboard().setText(text)
-        self.status.setText("已复制译文到剪贴板")
+        self.status.setText(tr("已复制译文到剪贴板"))
         return True
 
     def set_pinned(self, pinned: Optional[bool] = None) -> None:
@@ -397,7 +404,7 @@ class ResultWindow(QWidget):
     def toggle_original(self) -> None:
         self._original_visible = not self._original_visible
         self.original_text.setVisible(self._original_visible)
-        self.toggle_original_button.setText("收起" if self._original_visible else "展开")
+        self.toggle_original_button.setText(tr("收起") if self._original_visible else tr("展开"))
 
     def set_show_original(self, show: bool) -> None:
         if show != self._original_visible:

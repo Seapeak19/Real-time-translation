@@ -32,6 +32,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .screenshot import Capture
+from .ui.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ class SelectionOverlay(QWidget):
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setMouseTracking(True)
         self.setGeometry(*geometry)
-        self.setWindowTitle("选择要翻译的区域")
+        self.setWindowTitle(tr("选择要翻译的区域"))
 
     # ------------------------------------------------------------------
     # 坐标换算
@@ -351,7 +352,7 @@ class SelectionOverlay(QWidget):
         painter.drawText(QRect(x, y, width, height), Qt.AlignmentFlag.AlignCenter, text)
 
     def _paint_hint(self, painter: QPainter) -> None:
-        text = "拖拽选择要翻译的区域    ·    ESC / 右键取消"
+        text = tr("拖拽选择要翻译的区域    ·    ESC / 右键取消")
         font = QFont()
         font.setPointSize(11)
         painter.setFont(font)

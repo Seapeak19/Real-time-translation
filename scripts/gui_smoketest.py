@@ -159,17 +159,8 @@ def main() -> int:
     check(window.isVisible(), "移动到指定位置后仍可见")
     window.hide()
 
-    # --- 4. 设置面板 ---
-    from fanyi.ui.settings_dialog import SettingsDialog
-
-    dialog = SettingsDialog(config)
-    check(dialog.target_combo.count() == 3, "目标语言下拉项", str(dialog.target_combo.count()))
-    check(dialog.source_combo.count() == 4, "源语言下拉项（含自动检测）", str(dialog.source_combo.count()))
-    check(dialog.engine_list.count() == 4, "后端列表", str(dialog.engine_list.count()))
-    dialog.capture_hotkey_edit.setKeySequence("Ctrl+Alt+Q")
-    dialog._on_accept()
-    check(config.hotkey == "ctrl+alt+q", "设置保存热键", config.hotkey)
-    dialog.deleteLater()
+    # --- 4. 设置窗口的下拉与快捷键（旧版 SettingsDialog 已在 v0.2.2 移除，
+    #         等价检查统一到 MainWindow，见第 9 节） ---
 
     # --- 5. 历史 ---
     from fanyi.ui.history import HistoryEntry, HistoryStore
