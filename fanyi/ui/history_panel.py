@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from .history import HistoryEntry
+from .theme import BASE_STYLESHEET
 
 
 class HistoryPanel(QDialog):
@@ -36,6 +37,9 @@ class HistoryPanel(QDialog):
     def __init__(self, entries: Optional[List[HistoryEntry]] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("翻译历史")
+        # 带独立 windowFlags 的顶层窗口不一定继承应用级样式表，
+        # 显式挂一份，保证配色与主界面一致（否则选中行会是系统深蓝）
+        self.setStyleSheet(BASE_STYLESHEET)
         self.resize(760, 480)
         self._entries: List[HistoryEntry] = []
 

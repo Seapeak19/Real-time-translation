@@ -90,6 +90,7 @@ python scripts\bootstrap_dev.py
 | `.venv\Scripts\python.exe -m pytest` | 单元测试（纯逻辑，不联网、不弹窗） |
 | `.venv\Scripts\python.exe scripts\selfcheck.py` | 环境自检：依赖、OCR、翻译、截图、热键、端到端 |
 | `.venv\Scripts\python.exe scripts\gui_smoketest.py` | 界面冒烟：托盘、结果窗、设置、历史、框选覆盖层、后台线程、真实 OCR+翻译 |
+| `.venv\Scripts\python.exe scripts\diagnose_ui.py` | 界面外观诊断：真实渲染各窗口为 PNG、检查配色对比度与字体 |
 | `.venv\Scripts\python.exe scripts\launch_check.py` | 真的启动一次主程序，确认常驻、单实例、热键注册与日志 |
 | `.venv\Scripts\python.exe scripts\verify_package.py` | 真的启动打包后的 exe，确认它在没有 Python 的环境里也能跑 |
 | `.venv\Scripts\python.exe scripts\probe_engines.py` | 逐个探测翻译后端在你的网络下的连通性与时延 |
@@ -145,6 +146,21 @@ python scripts\bootstrap_dev.py
 | 结果窗内 `Ctrl + C` | 复制译文 |
 | 结果窗内 `Ctrl + R` | 重译 |
 | 结果窗内 `Esc` | 关闭结果窗 |
+
+### 界面外观
+
+界面统一为**明亮的纯白主题**：侧栏、内容区、状态栏、结果窗、历史窗全部白底，
+只用 1px 淡边框分区。这一点在系统开启深色模式时尤其重要——
+Windows 深色模式下 Qt 默认给出深色调色板，若不处理就会出现
+「白底白字」和「侧栏深灰、内容区白色」的一明一暗。
+
+实现方式（见 `fanyi/ui/theme.py`）是同时做两件事，而不是逐个控件补颜色：
+
+1. 给 `QApplication` 装一套完整的浅色调色板（含 `Text`/`WindowText`/`ButtonText`
+   这些**前景色**，以及激活/非激活/禁用三种状态）；
+2. 用 Fusion 样式，避免 `windows11` 样式在深色模式下对原生控件自行染色。
+
+这样新增控件默认就是浅色，不用再操心配色。
 
 ### 命令行参数
 
@@ -243,6 +259,7 @@ python -m fanyi --debug                   # 输出调试日志
 │   │   └── pipeline.py   图像 → 文本 → 译文 的完整流程
 │   └── ui/
 │       ├── controller.py     总控制器：串起托盘/热键/覆盖层/管线/窗口
+│       ├── theme.py          统一明亮主题（浅色调色板 + 全局样式表）
 │       ├── main_window.py    设置主窗口（语言/快捷键/OCR/翻译/界面）
 │       ├── hotkey_edit.py    快捷键录制控件
 │       ├── tray.py           托盘图标与菜单
@@ -257,6 +274,7 @@ python -m fanyi --debug                   # 输出调试日志
 │   ├── selfcheck.py      环境自检（OCR/翻译/截图/热键/端到端）
 │   ├── gui_smoketest.py  界面冒烟测试（含设置窗口与快捷键录制）
 │   ├── diagnose_dpi.py   框选坐标体系诊断（排查高 DPI 错位）
+│   ├── diagnose_ui.py    界面外观诊断（渲染截图 + 配色对比度 + 字体）
 │   ├── launch_check.py   真实启动验证（常驻/单实例/热键）
 │   ├── verify_package.py 验证打包产物可独立运行
 │   ├── make_icon.py      生成程序图标

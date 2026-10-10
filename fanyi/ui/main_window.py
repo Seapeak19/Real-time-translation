@@ -44,36 +44,62 @@ from ..config import (
 from ..hotkey import format_hotkey
 from ..languages import LANGUAGES, SUPPORTED, label as lang_label
 from .hotkey_edit import HotkeyEdit
+from .theme import (
+    ACCENT,
+    ACCENT_DARK,
+    ACCENT_SOFT,
+    BASE_STYLESHEET,
+    BORDER,
+    BORDER_SOFT,
+    SURFACE_ALT,
+    TEXT,
+    TEXT_BODY,
+    TEXT_MUTED,
+    WHITE,
+)
 
-_STYLE = """
-#Sidebar { background: #F6F8FC; border-right: 1px solid #E3E8F0; }
-#SidebarTitle { color: #6B7280; font-weight: 600; padding: 10px 12px 4px 12px; }
-#Sidebar QListWidget { background: transparent; border: none; outline: none; }
-#Sidebar QListWidget::item { padding: 9px 12px; border-radius: 6px; color: #374151; }
-#Sidebar QListWidget::item:selected { background: #E3EDFF; color: #1D4ED8; font-weight: 600; }
-#Content { background: #FFFFFF; }
-#PageTitle { color: #111827; font-size: 15pt; font-weight: 700; }
-#PageDesc { color: #6B7280; }
-#StatusBar { background: #F6F8FC; border-top: 1px solid #E3E8F0; }
-#StatusText { color: #6B7280; }
-QGroupBox {
-    border: 1px solid #E3E8F0; border-radius: 8px; margin-top: 12px;
-    padding: 12px 12px 10px 12px; color: #374151; font-weight: 600;
-}
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 4px; }
-QComboBox, QSpinBox, QDoubleSpinBox {
-    border: 1px solid #D8DEE8; border-radius: 6px; padding: 4px 8px;
-    background: #FFFFFF; min-height: 20px;
-}
-QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border-color: #A9C7FF; }
-QPushButton {
-    border: 1px solid #D8DEE8; border-radius: 6px; padding: 5px 12px;
-    background: #FFFFFF; color: #374151;
-}
-QPushButton:hover { background: #F0F5FF; border-color: #A9C7FF; color: #1D4ED8; }
-QPushButton#Primary { background: #2563EB; border-color: #2563EB; color: #FFFFFF; font-weight: 600; }
-QPushButton#Primary:hover { background: #1D4ED8; border-color: #1D4ED8; }
-QListWidget { border: 1px solid #E3E8F0; border-radius: 6px; }
+#: 主窗口自己的样式，追加在全局主题之后。
+#:
+#: 统一的明亮白色：侧栏、内容区、状态栏全部白底，
+#: 只用 1px 淡边框做分区，不再用灰色块（否则在深色系统上就是"一明一暗"）。
+#: 这里**每个带颜色的选择器都显式写了前景色**——只写背景色是之前
+#: 白底白字（看着像乱码）的根因。
+_STYLE = BASE_STYLESHEET + f"""
+#Sidebar {{ background: {WHITE}; border-right: 1px solid {BORDER_SOFT}; }}
+#SidebarTitle {{ color: {TEXT_MUTED}; font-weight: 600; padding: 10px 12px 4px 12px; }}
+#SidebarList {{ background: {WHITE}; border: none; }}
+#SidebarList::item {{ padding: 9px 12px; border-radius: 6px; color: {TEXT_BODY}; }}
+#SidebarList::item:hover {{ background: {SURFACE_ALT}; color: {ACCENT_DARK}; }}
+#SidebarList::item:selected {{ background: {ACCENT_SOFT}; color: {ACCENT_DARK}; font-weight: 600; }}
+#Content {{ background: {WHITE}; }}
+#PageTitle {{ color: {TEXT}; font-size: 15pt; font-weight: 700; }}
+#PageDesc {{ color: {TEXT_MUTED}; }}
+#TipBox {{
+    color: {TEXT_MUTED}; background: {SURFACE_ALT};
+    border: 1px solid {BORDER_SOFT}; border-radius: 6px; padding: 10px;
+}}
+#StatusBar {{ background: {WHITE}; border-top: 1px solid {BORDER_SOFT}; }}
+#StatusText {{ color: {TEXT_MUTED}; }}
+#StatusWarn {{ color: #B45309; }}
+QGroupBox {{
+    background: {WHITE}; border: 1px solid {BORDER_SOFT}; border-radius: 8px;
+    margin-top: 12px; padding: 12px 12px 10px 12px;
+    color: {TEXT_BODY}; font-weight: 600;
+}}
+QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 4px; color: {TEXT_BODY}; }}
+QComboBox, QSpinBox, QDoubleSpinBox {{
+    background: {WHITE}; color: {TEXT}; border: 1px solid {BORDER};
+    border-radius: 6px; padding: 4px 8px; min-height: 20px;
+}}
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{ border-color: #A9C7FF; }}
+QPushButton {{
+    background: {WHITE}; color: {TEXT_BODY}; border: 1px solid {BORDER};
+    border-radius: 6px; padding: 5px 12px;
+}}
+QPushButton:hover {{ background: #F0F5FF; border-color: #A9C7FF; color: {ACCENT_DARK}; }}
+QPushButton#Primary {{ background: {ACCENT}; border-color: {ACCENT}; color: {WHITE}; font-weight: 600; }}
+QPushButton#Primary:hover {{ background: {ACCENT_DARK}; border-color: {ACCENT_DARK}; }}
+QListWidget {{ background: {WHITE}; color: {TEXT}; border: 1px solid {BORDER_SOFT}; border-radius: 6px; }}
 """
 
 
@@ -291,13 +317,21 @@ class MainWindow(QDialog):
         self.capture_hotkey.hotkey_changed.connect(self._on_capture_hotkey)
         self.capture_hotkey.recording_started.connect(self._on_record_started)
         self.capture_hotkey.recording_stopped.connect(self._on_record_stopped)
-        form.addLayout(_row("截图翻译", self.capture_hotkey, "唤出框选层，框住哪里就翻译哪里"))
+        form.addLayout(
+            _wide_row("截图翻译", self.capture_hotkey, "唤出框选层，框住哪里就翻译哪里")
+        )
 
         self.repeat_hotkey = HotkeyEdit(self.config.repeat_hotkey, placeholder="不设置")
         self.repeat_hotkey.hotkey_changed.connect(self._on_repeat_hotkey)
         self.repeat_hotkey.recording_started.connect(self._on_record_started)
         self.repeat_hotkey.recording_stopped.connect(self._on_record_stopped)
-        form.addLayout(_row("重译上次区域", self.repeat_hotkey, "不重新截图，直接重译上一次框选的区域"))
+        form.addLayout(
+            _wide_row(
+                "重译上次区域",
+                self.repeat_hotkey,
+                "不重新截图，直接把上一次框选的区域再翻译一次",
+            )
+        )
 
         self.hotkey_apply_button = QPushButton("重新注册快捷键")
         self.hotkey_apply_button.clicked.connect(self.reapply_hotkeys_requested.emit)
@@ -651,34 +685,63 @@ def _select_data(combo: QComboBox, value: str) -> None:
 
 
 def _row(label: str, widget: QWidget, hint: str = "") -> QHBoxLayout:
-    """一行设置项：左标签、中控件、右灰色说明。"""
+    """一行设置项：左标签、中控件、右灰色说明。
+
+    说明文字会给一个较小的最小宽度：它一旦太宽就会把中间的控件挤扁
+    （快捷键录入框曾经被挤到只剩一个字母宽）。需要完整宽度的控件
+    请用 :func:`_wide_row`。
+    """
     row = QHBoxLayout()
     row.setSpacing(10)
 
     name = QLabel(label)
-    name.setMinimumWidth(96)
+    name.setMinimumWidth(104)
     name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
     row.addWidget(name)
 
-    widget.setMinimumWidth(200)
-    row.addWidget(widget, 1)
+    widget.setMinimumWidth(180)
+    row.addWidget(widget, 2)
 
     if hint:
         note = QLabel(hint)
         note.setObjectName("PageDesc")
         note.setWordWrap(True)
-        note.setMinimumWidth(240)
+        note.setMinimumWidth(150)
         row.addWidget(note, 1)
     return row
 
 
+def _wide_row(label: str, widget: QWidget, hint: str = "") -> QVBoxLayout:
+    """一行设置项：上方是占满宽度的控件，下方是说明文字。
+
+    适合录入框、列表这类需要横向空间的控件——说明文字放右侧会把它们挤扁。
+    """
+    column = QVBoxLayout()
+    column.setSpacing(4)
+
+    top = QHBoxLayout()
+    top.setSpacing(10)
+    name = QLabel(label)
+    name.setMinimumWidth(104)
+    name.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    top.addWidget(name)
+    top.addWidget(widget, 1)
+    column.addLayout(top)
+
+    if hint:
+        note = QLabel(hint)
+        note.setObjectName("PageDesc")
+        note.setWordWrap(True)
+        note.setContentsMargins(114, 0, 0, 0)
+        column.addWidget(note)
+    return column
+
+
 def _tip(text: str) -> QWidget:
     label = QLabel(text)
-    label.setObjectName("PageDesc")
+    label.setObjectName("TipBox")
     label.setWordWrap(True)
     label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-    label.setStyleSheet("QLabel { color: #6B7280; background: #F9FAFC;"
-                        " border: 1px solid #EEF1F6; border-radius: 6px; padding: 10px; }")
     return label
 
 

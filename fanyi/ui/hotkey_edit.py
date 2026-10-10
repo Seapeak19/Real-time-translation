@@ -114,7 +114,9 @@ class HotkeyEdit(QWidget):
         layout.setSpacing(6)
 
         self.display = QLabel()
-        self.display.setMinimumWidth(150)
+        # 必须够宽：``Ctrl + Alt + Page Up`` 这类组合很长，
+        # 宽度不足时 QLabel 会把文字截断（看起来像乱码或只显示第一个词）
+        self.display.setMinimumWidth(210)
         self.display.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.display.setStyleSheet(
             "QLabel { border: 1px solid #D8DEE8; border-radius: 6px;"

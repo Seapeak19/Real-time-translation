@@ -194,6 +194,7 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     from .screenshot import enable_dpi_awareness
     from .ui import activate
     from .ui.controller import AppController
+    from .ui.theme import apply_light_theme
 
     enable_dpi_awareness()  # 必须在创建 QApplication 之前
 
@@ -204,6 +205,9 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
 
     app = QApplication(sys.argv[:1])
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
+    # 必须在建任何窗口之前套主题：系统处于深色模式时，不套就会出现
+    # 白底白字（看起来像乱码）和侧栏深灰、内容区白色的一明一暗
+    apply_light_theme(app)
 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         QMessageBox.critical(

@@ -78,6 +78,20 @@ def main() -> int:
 
     app = QApplication(sys.argv[:1])
     check(app is not None, "创建 QApplication", f"平台插件 {app.platformName()}")
+
+    # 与真实程序一致地套用明亮主题：否则本测试跑在系统深色调色板下，
+    # 测出来的外观和用户看到的不是一回事
+    from fanyi.ui.theme import apply_light_theme, light_palette
+
+    apply_light_theme(app)
+    from PySide6.QtGui import QPalette
+
+    window_color = app.palette().color(QPalette.ColorRole.Window)
+    check(
+        window_color.lightness() > 200,
+        "明亮主题已生效（窗口底色为浅色）",
+        f"Window={window_color.name()} lightness={window_color.lightness()}",
+    )
     check(QSystemTrayIcon.isSystemTrayAvailable(), "系统托盘可用")
 
     screens = app.screens()

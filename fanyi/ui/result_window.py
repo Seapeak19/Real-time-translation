@@ -19,49 +19,64 @@ from PySide6.QtWidgets import (
 )
 
 from ..languages import label as lang_label
+from .theme import (
+    ACCENT,
+    ACCENT_DARK,
+    ACCENT_SOFT,
+    BASE_STYLESHEET,
+    BORDER,
+    BORDER_SOFT,
+    SURFACE_ALT,
+    TEXT,
+    TEXT_BODY,
+    TEXT_MUTED,
+    WHITE,
+)
 
 #: 译文框里可选的字体族（按可用性依次尝试）
 _FONT_CANDIDATES = ["Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", "SimSun"]
 
-_STYLE = """
-#ResultCard {
-    background: #FFFFFF;
-    border: 1px solid #D8DEE8;
+#: 统一明亮白色：所有带颜色的规则都显式给出前景色
+#: （只写背景色会在深色系统上出现白底白字，看着像乱码）
+_STYLE = BASE_STYLESHEET + f"""
+#ResultCard {{
+    background: {WHITE};
+    border: 1px solid {BORDER};
     border-radius: 10px;
-}
-#TitleBar {
-    background: #F4F6FA;
+}}
+#TitleBar {{
+    background: {WHITE};
     border-top-left-radius: 10px;
     border-top-right-radius: 10px;
-    border-bottom: 1px solid #E3E8F0;
-}
-#TitleText { color: #1F2937; font-weight: 600; }
-#StateText { color: #6B7280; }
-QLabel#SectionLabel { color: #6B7280; }
-QPlainTextEdit {
-    background: #FFFFFF;
-    border: 1px solid #E3E8F0;
+    border-bottom: 1px solid {BORDER_SOFT};
+}}
+#TitleText {{ color: {TEXT}; font-weight: 600; }}
+#StateText {{ color: {TEXT_MUTED}; }}
+QLabel#SectionLabel {{ color: {TEXT_MUTED}; }}
+QPlainTextEdit {{
+    background: {WHITE};
+    border: 1px solid {BORDER_SOFT};
     border-radius: 6px;
     padding: 6px;
-    color: #111827;
+    color: {TEXT};
     selection-background-color: #BFDBFE;
-}
-QPlainTextEdit#OriginalText { background: #FAFBFD; color: #4B5563; }
-QPushButton {
-    background: #FFFFFF;
-    border: 1px solid #D8DEE8;
+}}
+QPlainTextEdit#OriginalText {{ background: {SURFACE_ALT}; color: {TEXT_BODY}; }}
+QPushButton {{
+    background: {WHITE};
+    border: 1px solid {BORDER};
     border-radius: 6px;
     padding: 4px 10px;
-    color: #374151;
-}
-QPushButton:hover { background: #F0F5FF; border-color: #A9C7FF; color: #1D4ED8; }
-QPushButton:pressed { background: #E3EDFF; }
-QPushButton#PrimaryButton {
-    background: #2563EB; border-color: #2563EB; color: #FFFFFF; font-weight: 600;
-}
-QPushButton#PrimaryButton:hover { background: #1D4ED8; border-color: #1D4ED8; }
-QPushButton#CloseButton { border: none; background: transparent; color: #6B7280; padding: 4px 8px; }
-QPushButton#CloseButton:hover { background: #FEE2E2; color: #DC2626; }
+    color: {TEXT_BODY};
+}}
+QPushButton:hover {{ background: #F0F5FF; border-color: #A9C7FF; color: {ACCENT_DARK}; }}
+QPushButton:pressed {{ background: {ACCENT_SOFT}; }}
+QPushButton#PrimaryButton {{
+    background: {ACCENT}; border-color: {ACCENT}; color: {WHITE}; font-weight: 600;
+}}
+QPushButton#PrimaryButton:hover {{ background: {ACCENT_DARK}; border-color: {ACCENT_DARK}; }}
+QPushButton#CloseButton {{ border: none; background: transparent; color: {TEXT_MUTED}; padding: 4px 8px; }}
+QPushButton#CloseButton:hover {{ background: #FEE2E2; color: #DC2626; }}
 """
 
 
