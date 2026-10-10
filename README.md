@@ -45,7 +45,32 @@
 ### 方式一：直接运行打包好的程序（推荐给最终用户）
 
 进入 `dist\翻译\`，双击 **`翻译.exe`**。整个目录约 335 MB，可以拷到任何 Windows 机器上运行，
-**不需要安装 Python**。目录结构必须保持完整（`翻译.exe` 与 `_internal\` 同级）。
+**不需要安装 Python**。
+
+> ⚠ **不要把 `翻译.exe` 单独拷出来用**（比如只拖一个 exe 到桌面）。
+> 单目录打包的程序运行时依赖同级的 `_internal\` 目录（648 个文件），
+> 少了它双击就会报 **「找不到指定的模块」** —— 因为 `python312.dll`、
+> ONNX Runtime、Qt 等都在那里面。
+>
+> 想要桌面入口，请用**快捷方式**（见下），exe 本体留在原目录。
+
+### 建桌面快捷方式
+
+```powershell
+.venv\Scripts\python.exe scripts\create_shortcut.py
+```
+
+它会：
+
+1. 在真实桌面（识别 OneDrive 重定向）创建 `翻译.lnk`，目标与"起始位置"都指向打包目录；
+2. 若发现桌面上存在**单独的 `翻译.exe`**（跑不起来的那个副本），提示并删除；
+3. 校验同级 `_internal\` 是否存在——不存在就直接报错，不会给你一个点了打不开的图标。
+
+参数：`--target <目录或exe>` 换目标、`--name <名字>` 换显示名、`--keep-desktop-exe` 保留那个副本。
+
+> 快捷方式指向的是项目里的 `dist\翻译\`，所以**不要移动或改名 `dist` 目录**，
+> 否则快捷方式会失效。想放到别处（例如 `D:\工具\翻译\`），把整个
+> `dist\翻译\` 目录拷过去，再对这个新位置重新运行一次脚本即可。
 
 ### 方式二：从源码运行（推荐给要改代码的人）
 
@@ -315,6 +340,7 @@ python -m fanyi --debug                   # 输出调试日志
 │   ├── wrap_ui_strings.py 自动给界面字符串包 tr()（AST 改写）
 │   ├── launch_check.py   真实启动验证（常驻/单实例/热键）
 │   ├── verify_package.py 验证打包产物可独立运行
+│   ├── create_shortcut.py 建桌面快捷方式（并清理跑不起来的单独 exe 副本）
 │   ├── make_icon.py      生成程序图标
 │   └── probe_engines.py  翻译后端可用性与时延探测
 ├── tests/                单元测试
@@ -338,6 +364,31 @@ python -m fanyi --debug                   # 输出调试日志
 ---
 
 ## 常见问题
+
+**双击 exe 报「找不到指定的模块」？**
+九成是 **exe 与 `_internal\` 目录分开了**。单目录打包的程序必须整目录使用：
+
+1. 确认 `翻译.exe` 旁边有 `_internal\` 目录（应含 600+ 个文件）；
+2. 不要只拷 exe（拖到桌面、发微信单文件都会触发这个问题）；
+3. 桌面入口请用 `scripts\create_shortcut.py` 建快捷方式。
+
+排查命令：
+
+```powershell
+# 确认打包产物完整
+dir "dist\翻译\_internal" | Measure-Object          # 应有 600+ 项
+
+# 换到纯 ASCII 路径再试，排除路径编码因素
+Copy-Item "dist\翻译" "D:\fanyi-test\翻译" -Recurse; Start-Process "D:\fanyi-test\翻译\翻译.exe"
+```
+
+如果整目录完整、装过 VC++ 运行库（[下载](https://aka.ms/vs/17/release/vc_redist.x64.exe)）后仍报错，
+用保留控制台的 debug 配置重打包，它会直接把缺失的模块名打在窗口里：
+
+```powershell
+.venv\Scripts\python.exe -m PyInstaller --noconfirm 翻译-debug.spec --distpath dist-debug --workpath build-debug
+dist-debug\翻译-debug\翻译-debug.exe
+```
 
 **热键没反应？**
 1. 看托盘气泡或 `%APPDATA%\fanyi\fanyi.log` 是否有「热键注册失败」；
