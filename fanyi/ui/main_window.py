@@ -116,7 +116,7 @@ QListWidget {{ background: {WHITE}; color: {TEXT}; border: 1px solid {BORDER_SOF
 _SIDEBAR_KEYS = ("语言", "快捷键", "识别（OCR）", "翻译", "界面")
 
 #: OCR 引擎下拉项（代码, 翻译键）
-_OCR_KEYS = (("rapidocr", "RapidOCR（本地离线，中简/中繁/英）"),)
+_OCR_KEYS = (("rapidocr", "RapidOCR（本地离线，中英双语）"),)
 
 #: 翻译后端列表项（代码, 翻译键），顺序会被用户调整，这里只定义可选集合
 _ENGINE_KEYS = (
@@ -454,14 +454,8 @@ class MainWindow(QDialog):
         quick.addStretch(1)
         form.addLayout(quick)
 
-        self.normalize_check = QCheckBox(tr("自动统一简繁字形（目标为中文时把译文校正为简体/繁体）"))
-        self.normalize_check.setProperty("_i18n", "自动统一简繁字形（目标为中文时把译文校正为简体/繁体）")
-        self.normalize_check.setChecked(self.config.normalize_script)
-        form.addWidget(self.normalize_check)
-
         self.source_combo.currentIndexChanged.connect(self._emit_languages)
         self.target_combo.currentIndexChanged.connect(self._emit_languages)
-        self.normalize_check.toggled.connect(self._emit_languages)
 
         return self._page(
             ui_box,
@@ -473,7 +467,7 @@ class MainWindow(QDialog):
                 )
             ),
             title=tr("语言"),
-            desc=tr("决定把屏幕上的文字翻译成哪种语言。支持简体中文、繁体中文、英语互译。"),
+            desc=tr("决定把屏幕上的文字翻译成哪种语言。支持简体中文与英语互译。"),
         )
 
     def _emit_ui_language(self) -> None:
@@ -952,7 +946,6 @@ class MainWindow(QDialog):
         # 由 ui_language_changed 信号单独处理，避免被 collect 覆盖回去
         config.source_lang = self.source_combo.currentData()
         config.target_lang = self.target_combo.currentData()
-        config.normalize_script = self.normalize_check.isChecked()
 
         config.hotkey_enabled = self.hotkey_enabled_check.isChecked()
         config.hotkey = self.capture_hotkey.hotkey or config.hotkey
@@ -983,7 +976,6 @@ class MainWindow(QDialog):
         self.config = config
         _select_data(self.source_combo, config.source_lang)
         _select_data(self.target_combo, config.target_lang)
-        self.normalize_check.setChecked(config.normalize_script)
         self.hotkey_enabled_check.setChecked(config.hotkey_enabled)
         self.capture_hotkey.set_hotkey(config.hotkey)
         self.repeat_hotkey.set_hotkey(config.repeat_hotkey)

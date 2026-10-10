@@ -6,7 +6,6 @@ onnxruntime>=1.17
 numpy>=1.24
 opencv-python-headless>=4.8
 Pillow>=10.0
-opencc-python-reimplemented>=0.1.7
 keyboard>=0.13.5
 
 # 开发/打包依赖（可选）

@@ -22,8 +22,6 @@ from ..languages import (
     AUTO,
     EN,
     ZH_HANS,
-    ZH_HANT,
-    convert_script,
     from_provider,
     info,
 )
@@ -80,7 +78,6 @@ MAX_COOLDOWN = 180.0
 #: 产品名、代码片段上很常见（实测 MyMemory 大量回显原文）。
 _SCRIPT_PATTERNS = {
     ZH_HANS: re.compile(r"[\u4e00-\u9fff]"),
-    ZH_HANT: re.compile(r"[\u4e00-\u9fff]"),
     EN: re.compile(r"[A-Za-z]"),
 }
 
@@ -593,11 +590,6 @@ class TranslationService:
         else:
             source = from_provider(result.source_lang) or AUTO
         text = result.text or ""
-
-        # 后端只区分 zh-CN/zh-TW，字形是否一致取决于它自己；
-        # 这里按用户要求的目标字形再校正一次，保证"简体/繁体"选项真的生效。
-        if self.config.normalize_script and target in (ZH_HANS, ZH_HANT):
-            text = convert_script(text, target)
 
         result.text = text
         result.source_lang = source

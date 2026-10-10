@@ -27,7 +27,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from ..languages import EN, ZH_HANS, ZH_HANT
+from ..languages import EN, ZH_HANS
 from .base import (
     EngineError,
     RateLimitedError,
@@ -45,10 +45,12 @@ from .client import HttpClient
 
 
 def _normalize_zh(code: str) -> str:
-    """把各种中文写法归一到 zh-Hans / zh-Hant。"""
-    key = (code or "").replace("_", "-").lower()
-    if any(tag in key for tag in ("hant", "tw", "hk", "mo", "cht")):
-        return "zh-Hant"
+    """把各种中文写法归一为 zh-Hans。
+
+    历史上有 ``zh-Hant`` 分支（本工具曾提供繁体目标）。繁体选项移除后，
+    这里把所有中文标签都归到简体：它们指的是同一种语言，只是字形不同，
+    归到一处可以避免"后端回传 zh-TW 却被当成未知语言"。
+    """
     return "zh-Hans"
 
 
@@ -118,8 +120,6 @@ class GoogleTranslator(Translator):
 def _google_code(code: str) -> str:
     if code == ZH_HANS:
         return "zh-CN"
-    if code == ZH_HANT:
-        return "zh-TW"
     return code
 
 
@@ -151,7 +151,7 @@ class YoudaoTranslator(Translator):
     """``aidemo.youdao.com/trans`` 免费接口。
 
     实测最快（0.2 ~ 1 秒），作为首选后端。
-    只区分 ``zh-CHS``，繁体目标由 :mod:`fanyi.languages` 在本地做字形转换。
+    中文只区分 ``zh-CHS``（简体），这也正对应本工具现在唯一的中文目标。
     """
 
     name = "youdao"
@@ -234,19 +234,19 @@ class YoudaoTranslator(Translator):
 def _youdao_code(code: str) -> str:
     if code == ZH_HANS:
         return "zh-CHS"
-    if code == ZH_HANT:
-        return "zh-CHT"
     return code
 
 
 def _normalize_lang_tag(tag: str) -> str:
-    """把 ``zh-CHS`` / ``EN`` / ``zh-TW`` 之类的标签归一到内部代码。"""
+    """把 ``zh-CHS`` / ``EN`` / ``zh-TW`` 之类的标签归一到内部代码。
+
+    繁体中文字形标签（``zh-CHT`` / ``zh-TW`` / ``zh-Hant``）一律归到简体：
+    同一种语言的不同字形，归到一处才不会显示成"未知语言"。
+    """
     key = (tag or "").replace("_", "-").lower()
     if not key:
         return ""
     if key.startswith("zh"):
-        if any(t in key for t in ("cht", "hant", "tw", "hk")):
-            return ZH_HANT
         return ZH_HANS
     if key.startswith("en"):
         return EN
@@ -312,11 +312,9 @@ class MyMemoryTranslator(Translator):
 def _mymemory_code(code: str, target: str) -> str:
     if code == "auto":
         # 没有自动检测能力：目标是非中文时假定原文是中文，否则假定是英文
-        return "en" if target in (ZH_HANS, ZH_HANT) else "zh-CN"
+        return "en" if target == ZH_HANS else "zh-CN"
     if code == ZH_HANS:
         return "zh-CN"
-    if code == ZH_HANT:
-        return "zh-TW"
     return code
 
 
@@ -547,8 +545,6 @@ class BingTranslator(Translator):
 def _bing_code(code: str) -> str:
     if code == ZH_HANS:
         return "zh-Hans"
-    if code == ZH_HANT:
-        return "zh-Hant"
     return code
 
 

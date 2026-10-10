@@ -66,13 +66,15 @@ class TestPrompt:
         assert "繁体" in system  # 明确要求不要输出繁体
         assert messages[1]["content"] == "Hello"
 
-    def test_prompt_for_traditional(self):
-        system = build_prompt("Hello", "auto", "zh-Hant")[0]["content"]
-        assert "繁体中文" in system
-
     def test_prompt_for_english(self):
         system = build_prompt("你好", "auto", "en")[0]["content"]
         assert "English" in system
+
+    def test_legacy_traditional_target_still_asks_for_simplified(self):
+        """繁体已移除：传入旧的 zh-Hant 也应要求输出简体中文，而不是"Unknown"。"""
+        system = build_prompt("Hello", "auto", "zh-Hant")[0]["content"]
+        assert "简体中文" in system
+        assert "Unknown" not in system
 
     def test_prompt_asks_for_plain_output(self):
         """必须明确"只输出译文"，否则模型会加上开场白。"""

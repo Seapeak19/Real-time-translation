@@ -1,20 +1,31 @@
-"""把设置窗口在三种界面语言下各渲染一遍，用于目视确认。
+"""把设置窗口在各界面语言下各渲染一遍，用于目视确认。
 
 输出到 testdata/i18n_<lang>.png。
 
 用法::
 
     .venv\\Scripts\\python scripts\\i18n_screenshots.py
+
+会构造真实的设置窗口，因此先把 ``FANYI_HOME`` 指向临时目录，
+避免覆盖用户的热键等设置。
 """
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+_SANDBOX = Path(tempfile.mkdtemp(prefix="fanyi_i18n_shot_"))
+os.environ["FANYI_HOME"] = str(_SANDBOX)
+atexit.register(lambda: shutil.rmtree(_SANDBOX, ignore_errors=True))
+
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
 OUT = ROOT / "testdata"
@@ -39,7 +50,7 @@ def main() -> int:
     app.processEvents()
 
     pages = ["语言", "快捷键", "识别OCR", "翻译", "界面"]
-    for language in ("zh-Hans", "zh-Hant", "en"):
+    for language in ("zh-Hans", "en"):
         set_language(language)
         window.retranslate()
         app.processEvents()

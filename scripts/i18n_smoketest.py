@@ -1,18 +1,29 @@
-"""界面语言切换的冒烟验证：三种语言下检查各控件文案。
+"""界面语言检查：各界面语言下检查各控件文案是否漏翻。
 
 用法::
 
     .venv\\Scripts\\python scripts\\i18n_smoketest.py
+
+会构造真实的设置窗口（可能触发配置写入），因此先把 ``FANYI_HOME``
+指向临时目录，避免覆盖用户的热键等设置。
 """
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+
+_SANDBOX = Path(tempfile.mkdtemp(prefix="fanyi_i18n_smoke_"))
+os.environ["FANYI_HOME"] = str(_SANDBOX)
+atexit.register(lambda: shutil.rmtree(_SANDBOX, ignore_errors=True))
+
 os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
 #: 判定"是否仍含中文"，用于发现漏翻
@@ -25,6 +36,7 @@ def main() -> int:
 
     app = QApplication(sys.argv[:1])
     from fanyi.config import Config
+    from fanyi.ui import i18n
     from fanyi.ui.i18n import set_language
     from fanyi.ui.main_window import MainWindow
     from fanyi.ui.theme import apply_light_theme
@@ -36,7 +48,7 @@ def main() -> int:
     app.processEvents()
 
     problems = []
-    for language in ("zh-Hans", "zh-Hant", "en"):
+    for language in ("zh-Hans", "en"):
         set_language(language)
         window.retranslate()
         app.processEvents()
@@ -79,12 +91,13 @@ def main() -> int:
     if not all(not has_cjk(item) for item in ui_langs_en):
         problems.append(f"[en] 界面语言下拉含中文: {ui_langs_en}")
 
-    set_language("zh-Hant")
+    # 繁体界面语言已移除：下拉里不该再出现繁体选项（简体的「简体中文」除外）
+    set_language("zh-Hans")
     window.retranslate()
     app.processEvents()
-    ui_langs_hant = [window.ui_language_combo.itemText(i) for i in range(window.ui_language_combo.count())]
-    if "簡體中文" not in ui_langs_hant:
-        problems.append(f"[zh-Hant] 界面语言下拉未用繁体: {ui_langs_hant}")
+    ui_langs_zh = [window.ui_language_combo.itemText(i) for i in range(window.ui_language_combo.count())]
+    if any("繁體" in item or "繁体" in item for item in ui_langs_zh):
+        problems.append(f"[zh-Hans] 界面语言下拉仍有繁体选项: {ui_langs_zh}")
 
     # 下拉选中项在切换语言后不应丢失
     set_language("zh-Hans")
@@ -107,7 +120,7 @@ def main() -> int:
         for item in problems:
             print(f"  - {item}")
         return 1
-    print("三种界面语言下文案检查通过 ✓")
+    print(f"{len(i18n.UI_LANGUAGES)} 种界面语言下文案检查通过 ✓")
     return 0
 
 

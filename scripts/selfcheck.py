@@ -194,19 +194,34 @@ def check_translate(offline: bool = False) -> None:
     service.close()
 
 
-def check_script_convert() -> None:
-    print("\n=== 4. 简繁字形转换 ===")
-    from fanyi.languages import convert_script
+def check_legacy_hant() -> None:
+    """检查旧繁体标签的兼容处理。
 
-    sample = "这是一个截图翻译软件，用来识别屏幕上的文字。"
-    traditional = convert_script(sample, "zh-Hant")
-    back = convert_script(traditional, "zh-Hans")
-    if traditional != sample and back == sample:
-        report(PASS, "简 → 繁 → 简 往返", f"繁体: {traditional}")
-    elif traditional != sample:
-        report(SKIP, "简繁转换", f"转换成功但往返不一致\n        繁体: {traditional}\n        回译: {back}")
+    繁体选项与简繁转换都已移除，但**旧配置里可能还写着 zh-Hant**、
+    后端也可能回传 zh-TW。这里确认这类标签会被当作简体中文，
+    而不是"未知语言"——否则老用户升级后会看到奇怪的语言名或翻译失败。
+    """
+    print("\n=== 4. 繁体选项移除后的兼容 ===")
+    from fanyi.config import Config
+    from fanyi.languages import is_legacy_hant, label, normalize_code
+
+    problems = []
+    for code in ("zh-Hant", "zh-TW", "zh-HK", "zh-CHT"):
+        if not is_legacy_hant(code):
+            problems.append(f"{code} 未被识别为旧繁体标签")
+        if normalize_code(code) != "zh-Hans":
+            problems.append(f"{code} 未归一到简体中文")
+        if label(code) != "简体中文":
+            problems.append(f"{code} 的显示名不是简体中文（实际 {label(code)}）")
+
+    config = Config.from_dict({"target_lang": "zh-Hant", "ui_language": "zh-Hant"})
+    if config.target_lang != "zh-Hans" or config.ui_language != "zh-Hans":
+        problems.append("旧配置里的 zh-Hant 未被迁移")
+
+    if problems:
+        report(FAIL, "繁体标签兼容", "\n        ".join(problems))
     else:
-        report(FAIL, "简繁转换", "繁体结果与原文相同，转换未生效")
+        report(PASS, "繁体标签兼容", "旧配置与后端回传的繁体标签都归一到简体中文")
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +366,7 @@ def main() -> int:
     check_imports()
     check_config()
     check_ocr(keep=args.keep)
-    check_script_convert()
+    check_legacy_hant()
     check_translate(offline=args.offline)
     check_screenshot()
     check_hotkey()

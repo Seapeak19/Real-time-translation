@@ -146,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=f"{app_title()} · {tr('截图识别文本并翻译的桌面工具')}",
     )
     parser.add_argument("--version", action="version", version=f"{app_title()} {APP_VERSION}")
-    parser.add_argument("--lang", help=tr("本次启动的目标语言（zh-Hans / zh-Hant / en）"))
+    parser.add_argument("--lang", help=tr("本次启动的目标语言（zh-Hans / en）"))
     parser.add_argument("--source", help=tr("本次启动的源语言（默认 auto 自动检测）"))
     parser.add_argument("--no-hotkey", action="store_true", help=tr("不注册全局热键"))
     parser.add_argument("--translate-image", metavar=tr("图片路径"), help=tr("直接翻译指定图片后退出"))

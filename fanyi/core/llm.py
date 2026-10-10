@@ -30,7 +30,7 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-from ..languages import AUTO, ZH_HANS, ZH_HANT, info
+from ..languages import AUTO, ZH_HANS, info, normalize_code
 from .base import (
     EngineError,
     RateLimitedError,
@@ -55,10 +55,11 @@ _FENCE_OPEN = re.compile(r"^\s*```[a-zA-Z0-9_+-]*\s*(?:\\n)?\s*")
 _FENCE_CLOSE = re.compile(r"\s*(?:\\n)?\s*```\s*$")
 _PREFIX = re.compile(r"^\s*(译文|翻译|translation|output)\s*[:：]\s*", re.IGNORECASE)
 
-#: 目标语言的写法，让模型明确输出哪种中文 / 语言
+#: 目标语言的写法，让模型明确输出哪种语言。
+#: 简体中文特意加一句"不要输出繁体字"：模型默认可能按训练语料输出繁体，
+#: 而我们只提供简体中文这一种中文目标。
 _TARGET_NAMES = {
     ZH_HANS: "简体中文（不要输出繁体字）",
-    ZH_HANT: "繁体中文（不要输出简体字）",
     "en": "English",
 }
 
@@ -68,8 +69,12 @@ def build_prompt(text: str, source: str, target: str) -> List[Dict[str, str]]:
 
     明确要求"只输出译文"，否则模型很容易加上"以下是翻译："之类的开场白。
     同时给出源语言线索（auto 时不写死，交给模型判断）。
+
+    目标语言先做一次规范化：旧配置可能还写着 ``zh-Hant``，
+    不处理的话提示词会变成"翻译成 Unknown"，模型只能瞎猜。
     """
-    target_name = _TARGET_NAMES.get(target, info(target).label_en or target)
+    resolved = normalize_code(target)
+    target_name = _TARGET_NAMES.get(resolved) or info(resolved).label_en or resolved
     if source == AUTO:
         hint = "源语言未知，请自行判断。"
     else:

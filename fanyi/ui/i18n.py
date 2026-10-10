@@ -1,4 +1,4 @@
-"""界面多语言：英语 / 简体中文 / 繁体中文。
+"""界面多语言：简体中文 / 英语。
 
 设计取舍
 --------
@@ -10,14 +10,16 @@
   这种占位符——漏翻只是不够完美，不会变成看不懂的东西；
 * 简体中文是作者语言，因此 zh-Hans 目录为空，直接返回原文。
 
-繁体目录由 :func:`fanyi.languages.convert_script` 在加载时自动生成，
-既省掉一份人工维护的重复数据，也保证与截图翻译用的简繁转换规则一致。
+**为什么不做繁体界面**：繁体只是字形差别，不是另一种语言。为它单独维护一份
+目录（或自动转换生成一份）会带来额外复杂度，而收益很小；需要繁体界面的用户
+通常也能读简体。要新增界面语言，正确做法是像英语那样加一份人工目录，
+而不是靠字形转换。
 
 用法::
 
-    from .translations import tr
+    from .i18n import tr
     label.setText(tr("源语言"))
-    label.setText(tr("{n} 条记录").format(n=3))   # 需要插值时用 format
+    label.setText(trn("共 {count} 条", count=3))
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-from ..languages import ZH_HANS, ZH_HANT, convert_script, set_ui_language_getter
+from ..languages import EN, ZH_HANS, set_ui_language_getter
 
 logger = logging.getLogger(__name__)
 
@@ -33,28 +35,19 @@ logger = logging.getLogger(__name__)
 # 因此把"当前界面语言"的取值函数注入进去。
 set_ui_language_getter(lambda: current_language())
 
-EN = "en"
-
 #: 界面语言可选值（顺序即设置界面里的展示顺序）
-UI_LANGUAGES = (ZH_HANS, ZH_HANT, EN)
+UI_LANGUAGES = (ZH_HANS, EN)
 
 #: 界面语言自身的名称，按**当前界面语言**分语言给出。
 #: 不能只存一份中文名：英文界面下如果还显示「简体中文」，就成了半中半英。
 UI_LANGUAGE_NAMES = {
     ZH_HANS: {
         ZH_HANS: "简体中文",
-        ZH_HANT: "繁体中文",
-        "en": "英语",
+        EN: "英语",
     },
-    ZH_HANT: {
-        ZH_HANS: "簡體中文",
-        ZH_HANT: "繁體中文",
-        "en": "英語",
-    },
-    "en": {
+    EN: {
         ZH_HANS: "Chinese (Simplified)",
-        ZH_HANT: "Chinese (Traditional)",
-        "en": "English",
+        EN: "English",
     },
 }
 
@@ -71,7 +64,6 @@ ENGLISH: Dict[str, str] = {
     "源语言": "Source language",
     "自动检测": "Auto detect",
     "简体中文": "Chinese (Simplified)",
-    "繁体中文": "Chinese (Traditional)",
     "英语": "English",
     "翻译历史…": "History…",
     "设置…": "Settings…",
@@ -117,9 +109,9 @@ ENGLISH: Dict[str, str] = {
     "设置 · 标题": "Settings",
 
     # ===== 语言页 =====
-    "决定把屏幕上的文字翻译成哪种语言。支持简体中文、繁体中文、英语互译。": (
+    "决定把屏幕上的文字翻译成哪种语言。支持简体中文与英语互译。": (
         "Choose which language the text on your screen is translated into. "
-        "Simplified Chinese, Traditional Chinese and English are all supported."
+        "Simplified Chinese and English are supported."
     ),
     "翻译语言": "Translation languages",
     "自动检测（由引擎判断）": "Auto detect (decided by the engine)",
@@ -130,9 +122,6 @@ ENGLISH: Dict[str, str] = {
     "⇄ 互换源语言与目标语言": "⇄ Swap source and target",
     "互换源语言与目标语言": "Swap source and target",
     "常用目标：": "Quick target:",
-    "自动统一简繁字形（目标为中文时把译文校正为简体/繁体）": (
-        "Normalize Chinese script (correct the translation to Simplified/Traditional)"
-    ),
     "无法互换": "Cannot swap",
     "源语言是「自动检测」时没有可互换的语言。\n请先把源语言指定为具体语言。": (
         "There is nothing to swap while the source language is \"Auto detect\".\n"
@@ -210,9 +199,7 @@ ENGLISH: Dict[str, str] = {
     "字太小识别不准时调到 1.5 ~ 2.0": "Raise to 1.5 ~ 2.0 when small text is misread",
     "最低置信度": "Minimum confidence",
     "低于该值的识别结果会被丢弃": "Results below this value are discarded",
-    "RapidOCR（本地离线，中简/中繁/英）": (
-        "RapidOCR (local, Simplified/Traditional Chinese + English)"
-    ),
+    "RapidOCR（本地离线，中英双语）": "RapidOCR (local, Chinese + English)",
     "RapidOCR（本地离线）": "RapidOCR (local)",
     "RapidOCR 模型在程序启动后会在后台加载（约 1~3 秒），之后常驻内存，\n"
     "单次识别通常在 1 秒内完成，全程不联网。": (
@@ -443,8 +430,8 @@ ENGLISH: Dict[str, str] = {
 
     # ===== 命令行参数 =====
     "截图识别文本并翻译的桌面工具": "Desktop tool that recognizes and translates screen text",
-    "本次启动的目标语言（zh-Hans / zh-Hant / en）": (
-        "Target language for this run (zh-Hans / zh-Hant / en)"
+    "本次启动的目标语言（zh-Hans / en）": (
+        "Target language for this run (zh-Hans / en)"
     ),
     "本次启动的源语言（默认 auto 自动检测）": (
         "Source language for this run (default: auto detect)"
@@ -474,23 +461,10 @@ ENGLISH: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 # 目录构建
 # ---------------------------------------------------------------------------
-_HANT_CACHE: Optional[Dict[str, str]] = None
-
-
-def _traditional_catalog() -> Dict[str, str]:
-    """繁体目录由简体原文自动转换而来，加载时生成一次。"""
-    global _HANT_CACHE
-    if _HANT_CACHE is None:
-        _HANT_CACHE = {key: convert_script(key, ZH_HANT) for key in ENGLISH}
-    return _HANT_CACHE
-
-
 def catalog(language: str) -> Dict[str, str]:
     """返回指定界面语言的翻译表（zh-Hans 为空表，直接回退原文）。"""
     if language == EN:
         return ENGLISH
-    if language == ZH_HANT:
-        return _traditional_catalog()
     return {}
 
 
@@ -501,8 +475,7 @@ def is_supported(language: str) -> bool:
 def language_display_name(language: str, ui_language: Optional[str] = None) -> str:
     """界面语言在给定界面语言下的显示名。
 
-    例如在英文界面下，``zh-Hans`` 显示为 ``Chinese (Simplified)``；
-    在繁体界面下显示为 ``簡體中文``。
+    例如在英文界面下，``zh-Hans`` 显示为 ``Chinese (Simplified)``。
     """
     target = ui_language or current_language()
     table = UI_LANGUAGE_NAMES.get(target) or UI_LANGUAGE_NAMES[ZH_HANS]

@@ -1,7 +1,14 @@
 """语言定义层。
 
-把"用户看到的语言"（简体中文 / 繁体中文 / English）与"各翻译后端使用的代码"解耦，
-并在中简/中繁之间做本地字形转换（在线引擎通常只区分 zh-CN，不区分字形）。
+把"用户看到的语言"（简体中文 / 英语）与"各翻译后端使用的代码"解耦。
+
+**为什么没有繁体中文**：繁体只是同一语言的另一种字形，把它当成一种"语言"
+会连带出一整套麻烦——目标语言多一项、界面语言多一项、还要引入 OpenCC 做
+字形转换、翻译缓存要按字形分开存、LLM 提示词要额外叮嘱"不要输出简体"。
+而实际需求通常是"看懂繁体内容"，这一点**读**就能满足：OCR 字典本身含繁体字，
+后端也能正确识别繁体输入，译文按目标语言（简体中文）输出即可。
+
+因此这里只保留简体中文与英语两种。
 """
 
 from __future__ import annotations
@@ -16,11 +23,10 @@ from typing import Dict, List, Optional
 
 AUTO = "auto"
 ZH_HANS = "zh-Hans"
-ZH_HANT = "zh-Hant"
 EN = "en"
 
 #: 本项目支持的语言，顺序即 UI 中的展示顺序
-SUPPORTED: List[str] = [ZH_HANS, ZH_HANT, EN]
+SUPPORTED: List[str] = [ZH_HANS, EN]
 
 
 @dataclass(frozen=True)
@@ -55,18 +61,6 @@ LANGUAGES: Dict[str, LanguageInfo] = {
         default="zh-CN",
         cjk=True,
     ),
-    ZH_HANT: LanguageInfo(
-        code=ZH_HANT,
-        label_zh="繁体中文",
-        label_en="Chinese (Traditional)",
-        provider_codes={
-            "google": "zh-TW",
-            "bing": "zh-Hant",
-            "mymemory": "zh-TW",
-        },
-        default="zh-TW",
-        cjk=True,
-    ),
     EN: LanguageInfo(
         code=EN,
         label_zh="英语",
@@ -86,6 +80,35 @@ AUTO_INFO = LanguageInfo(
 )
 
 
+def is_legacy_hant(code: str) -> bool:
+    """判断是否为已被移除的繁体中文字形代码。
+
+    保留这个判断是为了**兼容旧数据**：老配置里可能写着 ``zh-Hant``，
+    命令行可能有人传 ``zh-TW``，后端也可能回传这些标签。
+    它们指向的仍是中文，应当被当作简体中文处理，而不是"未知语言"。
+    """
+    key = (code or "").strip().replace("_", "-").lower()
+    if key == "zh-hant" or key.startswith("zh-hant-"):
+        return True
+    # zh-TW / zh-HK / zh-MO / zh-CHT 都是繁体写法
+    return any(tag in key for tag in ("-tw", "-hk", "-mo", "cht"))
+
+
+def normalize_code(code: str) -> str:
+    """把外部输入的语言代码规范成内部代码。
+
+    主要处理两件事：繁体中文字形标签归到简体中文；``AUTO`` 原样保留。
+    未知代码原样返回，由调用方决定如何提示。
+    """
+    if not code:
+        return code
+    if code == AUTO:
+        return AUTO
+    if is_legacy_hant(code):
+        return ZH_HANS
+    return code
+
+
 def is_supported(code: str) -> bool:
     """该语言代码是否为受支持的**目标**语言。"""
     return code in LANGUAGES
@@ -94,9 +117,9 @@ def is_supported(code: str) -> bool:
 def info(code: str) -> LanguageInfo:
     """取语言元信息。
 
-    对**未知代码不再抛异常**，而是退回"语言中立"的条目：
+    对**未知代码不抛异常**，而是退回"语言中立"的条目：
 
-    后端返回的检测语言可能超出我们支持的三种。实测 Bing 会把
+    后端返回的检测语言可能超出我们支持的两种。实测 Bing 会把
     ``Transformer``、``claude-3-5-sonnet`` 这类短词判成 ``fr``（法语）、
     把 ``v1.2.3-beta`` 判成 ``et``（爱沙尼亚语）。之前这里直接
     ``raise ValueError``，异常冒到翻译服务后被当成"后端失败"，
@@ -113,7 +136,7 @@ def info(code: str) -> LanguageInfo:
     return UNKNOWN_INFO
 
 
-#: 兜底条目：调用方拿到它不会崩，只是不做字形转换、不按 CJK 断行
+#: 兜底条目：调用方拿到它不会崩，只是不按 CJK 断行
 UNKNOWN_INFO = LanguageInfo(
     code="und",
     label_zh="未知语言",
@@ -126,15 +149,14 @@ def label(code: str) -> str:
     """语言的显示名，跟随当前界面语言。
 
     * 简体中文界面 → ``简体中文`` / ``英语``
-    * 繁体中文界面 → ``簡體中文`` / ``英語``
     * 英语界面     → ``Chinese (Simplified)`` / ``English``
+
+    传入繁体中文字形标签（``zh-Hant`` / ``zh-TW``）时按简体中文显示，
+    避免旧配置或后端回传这类标签时界面出现"未知语言"。
     """
-    info_ = info(code)
-    ui_language = _current_ui_language()
-    if ui_language == EN:
-        return _EN_NAMES.get(code, info_.label_zh)
-    if ui_language == ZH_HANT:
-        return _HANT_NAMES.get(info_.label_zh, info_.label_en)
+    info_ = info(normalize_code(code))
+    if _current_ui_language() == EN:
+        return _EN_NAMES.get(info_.code, info_.label_zh)
     return info_.label_zh
 
 
@@ -146,17 +168,8 @@ def label(code: str) -> str:
 #: 反向导入会形成循环依赖。未注入时一律返回中文名，核心层仍可独立使用。
 _ui_language_getter = None
 
-_HANT_NAMES = {
-    "简体中文": "簡體中文",
-    "繁体中文": "繁體中文",
-    "英语": "英語",
-    "自动检测": "自動偵測",
-    "未知语言": "未知語言",
-}
-
 _EN_NAMES = {
     ZH_HANS: "Chinese (Simplified)",
-    ZH_HANT: "Chinese (Traditional)",
     EN: "English",
     AUTO: "Auto detect",
     "und": "Unknown",
@@ -184,16 +197,18 @@ def to_provider(code: str, provider: str) -> str:
 
 
 def from_provider(raw: Optional[str]) -> str:
-    """把后端返回的语言代码（可能是 en / zh-CN / zh-TW / zh-Hans …）归一化为内部代码。"""
+    """把后端返回的语言代码（en / zh-CN / zh-TW / zh-Hant …）归一化为内部代码。
+
+    繁体相关的标签（``zh-TW`` / ``zh-Hant`` …）统一归到简体中文：
+    这两者只是字形差别，翻译能力上属于同一种语言。这样后端即使回传
+    ``zh-TW``，本工具也不会把它当成"未知语言"。
+    """
     if not raw:
         return AUTO
     key = raw.strip().replace("_", "-").lower()
     if key in ("auto", "autodetect", "auto-detect", ""):
         return AUTO
     if key.startswith("zh"):
-        # zh-tw / zh-hk / zh-hant / zh-cht → 繁体；其余（zh / zh-cn / zh-hans）→ 简体
-        if any(tag in key for tag in ("hant", "tw", "hk", "mo", "cht")):
-            return ZH_HANT
         return ZH_HANS
     if key.startswith("en"):
         return EN
@@ -202,41 +217,8 @@ def from_provider(raw: Optional[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 字形转换（简体 ↔ 繁体）
+# 文本工具
 # ---------------------------------------------------------------------------
-
-_OPENCC = None
-_OPENCC_TRIED = False
-
-
-def _load_opencc():
-    """惰性加载 opencc（可选依赖），失败则返回 None。"""
-    global _OPENCC, _OPENCC_TRIED
-    if _OPENCC_TRIED:
-        return _OPENCC
-    _OPENCC_TRIED = True
-    try:
-        from opencc import OpenCC  # type: ignore
-
-        _OPENCC = OpenCC
-    except Exception:
-        _OPENCC = None
-    return _OPENCC
-
-
-#: 极简内置兜底词表：仅在缺少 opencc 时使用，覆盖最常见的字形差异
-_FALLBACK_S2T = {
-    "简": "簡", "体": "體", "汉": "漢", "语": "語", "译": "譯", "这": "這", "个": "個",
-    "们": "們", "为": "為", "说": "說", "认": "認", "识": "識", "别": "別", "时": "時",
-    "间": "間", "现": "現", "图": "圖", "别": "別", "软": "軟", "件": "件", "电": "電",
-    "脑": "腦", "网": "網", "页": "頁", "开": "開", "关": "關", "设": "設", "置": "置",
-    "发": "發", "现": "現", "问": "問", "题": "題", "后": "後", "从": "從", "长": "長",
-    "车": "車", "东": "東", "马": "馬", "鸟": "鳥", "鱼": "魚", "龙": "龍", "术": "術",
-    "应": "應", "该": "該", "种": "種", "样": "樣", "数": "數", "据": "據", "处": "處",
-    "理": "理", "统": "統", "计": "計", "过": "過", "还": "還", "进": "進", "运": "運",
-    "输": "輸", "转": "轉", "换": "換", "选": "選", "择": "擇", "读": "讀", "写": "寫",
-}
-_FALLBACK_T2S = {v: k for k, v in _FALLBACK_S2T.items()}
 
 _CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 
@@ -246,34 +228,13 @@ def has_cjk(text: str) -> bool:
     return bool(_CJK_RE.search(text))
 
 
-def convert_script(text: str, target: str) -> str:
-    """把中文文本转换成目标字形（zh-Hans / zh-Hant）。
-
-    优先使用 opencc（精确、覆盖全）；不可用时退化为内置常用字表。
-    文本不含中文、或目标不是中文时原样返回。
-    """
-    if not text or target not in (ZH_HANS, ZH_HANT):
-        return text
-    if not has_cjk(text):
-        return text
-
-    OpenCC = _load_opencc()
-    if OpenCC is not None:
-        config = "t2s" if target == ZH_HANS else "s2t"
-        try:
-            return OpenCC(config).convert(text)
-        except Exception:
-            pass
-
-    table = _FALLBACK_T2S if target == ZH_HANS else _FALLBACK_S2T
-    return "".join(table.get(ch, ch) for ch in text)
-
-
 def needs_script_conversion(source: str, target: str) -> bool:
-    """给定源语言与目标语言，是否需要本地字形规范化。"""
-    if target not in (ZH_HANS, ZH_HANT):
-        return False
-    return source in (ZH_HANS, ZH_HANT, AUTO)
+    """是否需要本地字形规范化。
+
+    保留此函数是为了兼容既有调用点，**现在恒为 False**：
+    简繁转换已随繁体选项一并移除，译文直接采用后端返回的字形。
+    """
+    return False
 
 
 # ---------------------------------------------------------------------------

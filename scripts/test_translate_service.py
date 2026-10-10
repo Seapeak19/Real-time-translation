@@ -70,20 +70,19 @@ def main() -> int:
     except Exception as exc:
         check(False, "中 → 英", f"{type(exc).__name__}: {exc}")
 
-    # --- 3. 繁体字形归一 ---
-    print("\n3) 繁体字形归一（目标 zh-Hant）")
+    # --- 3. 旧繁体目标语言的兼容 ---
+    print("\n3) 旧目标语言 zh-Hant 的兼容（繁体已移除，应回退为简体中文）")
     try:
         result = service.translate(
-            f"Traditional check {time.time_ns() % 100000}: the software runs in the background.",
+            f"Legacy target check {time.time_ns() % 100000}: the software runs in the background.",
             target="zh-Hant",
             source="auto",
             use_cache=False,
         )
-        traditional_chars = set("軟體翻譯識別這个們為")
-        has_traditional = any(ch in result.text for ch in "軟體譯識這們為")
-        check(has_traditional, "译文包含繁体字形", f"{result.text[:70]}")
+        has_cjk = any("\u4e00" <= ch <= "\u9fff" for ch in result.text)
+        check(has_cjk, "旧繁体目标仍能译出中文", f"目标被规范化为 {result.target_lang} · {result.text[:60]}")
     except Exception as exc:
-        check(False, "繁体字形归一", f"{type(exc).__name__}: {exc}")
+        check(False, "旧繁体目标兼容", f"{type(exc).__name__}: {exc}")
 
     # --- 4. 缓存命中 ---
     print("\n4) 缓存命中")

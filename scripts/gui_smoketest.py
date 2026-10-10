@@ -9,6 +9,10 @@
 * 历史面板与历史存储
 * CPU 光栅化的框选覆盖层：模拟拖拽 → 选区坐标换算 → 真实 OCR + 翻译
 
+**配置隔离**：测试会走设置窗口的保存流程，若用真实配置目录就会把用户的
+热键、后端顺序等设置覆盖掉（真实踩过这个坑）。因此这里先把 ``FANYI_HOME``
+指向临时目录，测试期间的读写都落在临时目录里，跑完即删。
+
 用法::
 
     .venv\\Scripts\\python scripts\\gui_smoketest.py           # 含网络翻译
@@ -18,14 +22,23 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# 必须在导入 fanyi 之前设置：app_home() 在导入期之后才读环境变量，
+# 但配置对象可能在任意时刻构造，早点设更保险。
+_SANDBOX = Path(tempfile.mkdtemp(prefix="fanyi_smoketest_"))
+os.environ["FANYI_HOME"] = str(_SANDBOX)
+atexit.register(lambda: shutil.rmtree(_SANDBOX, ignore_errors=True))
 
 # 与 fanyi/app.py 保持一致：Qt 的高 DPI 自动缩放必须关掉，
 # 否则测试跑在"逻辑像素"坐标系里，与真实程序的设备像素坐标系不一致。
@@ -145,8 +158,8 @@ def main() -> int:
     window.show_error("网络超时", original="Hello world")
     check("网络超时" in window.status.text(), "error 状态", window.status.text())
 
-    window.set_languages("auto", "zh-Hant")
-    check("繁体" in window.target_button.text(), "语言标签更新", window.target_button.text())
+    window.set_languages("auto", "en")
+    check("英语" in window.target_button.text(), "语言标签更新", window.target_button.text())
     window.set_font_size(16)
     check(window.translation_text.font().pointSize() == 18, "字号设置生效（译文比原文大 2pt）")
     window.toggle_original()
@@ -342,8 +355,19 @@ def main() -> int:
     check(settings._stack.count() == 5, "设置窗口有 5 个页面")
     check(settings._sidebar.count() == 5, "侧栏导航项齐全",
           str([settings._sidebar.item(i).text() for i in range(settings._sidebar.count())]))
-    check(settings.target_combo.count() == 3, "目标语言可选项")
-    check(settings.source_combo.count() == 4, "源语言可选项（含自动检测）")
+    # 与语言层保持一致，避免每加减一种语言都要改测试
+    from fanyi.languages import SUPPORTED
+
+    check(
+        settings.target_combo.count() == len(SUPPORTED),
+        "目标语言可选项",
+        f"{settings.target_combo.count()} 项（支持 {len(SUPPORTED)} 种）",
+    )
+    check(
+        settings.source_combo.count() == len(SUPPORTED) + 1,
+        "源语言可选项（含自动检测）",
+        f"{settings.source_combo.count()} 项",
+    )
     check(settings.capture_hotkey.display.text() == "Ctrl + Alt + Z", "快捷键以可读形式展示",
           settings.capture_hotkey.display.text())
     # 断言"列表项数 == 可选后端数"，而不是写死数字：
@@ -451,9 +475,9 @@ def main() -> int:
 
     if main_window is not None:
         # 语言改动经控制器落到配置
-        main_window._set_target("zh-Hant")
+        main_window._set_target("en")
         app.processEvents()
-        check(controller.config.target_lang == "zh-Hant", "设置窗口改语言后配置已更新",
+        check(controller.config.target_lang == "en", "设置窗口改语言后配置已更新",
               controller.config.target_lang)
         main_window._set_target("zh-Hans")
 

@@ -1,4 +1,4 @@
-"""语言层的单元测试：分行拼接、简繁转换、代码归一化。"""
+"""语言层的单元测试：分行拼接、代码归一化、旧繁体标签的兼容。"""
 
 from __future__ import annotations
 
@@ -65,10 +65,11 @@ class TestProviderCode:
             ("zh-CN", "zh-Hans"),
             ("zh-Hans", "zh-Hans"),
             ("zh_CHS", "zh-Hans"),
-            ("zh-TW", "zh-Hant"),
-            ("zh-Hant", "zh-Hant"),
-            ("zh-HK", "zh-Hant"),
-            ("zh-CHT", "zh-Hant"),
+            # 繁体已移除：这些字形标签统一归到简体，不能变成"未知语言"
+            ("zh-TW", "zh-Hans"),
+            ("zh-Hant", "zh-Hans"),
+            ("zh-HK", "zh-Hans"),
+            ("zh-CHT", "zh-Hans"),
             ("ja", "ja"),
             (None, "auto"),
             ("", "auto"),
@@ -82,40 +83,43 @@ class TestProviderCode:
 
     def test_to_provider_uses_mapping(self):
         assert L.to_provider("zh-Hans", "google") == "zh-CN"
-        assert L.to_provider("zh-Hant", "google") == "zh-TW"
         assert L.to_provider("zh-Hans", "bing") == "zh-Hans"
         assert L.to_provider("en", "any-engine") == "en"
 
 
 # ---------------------------------------------------------------------------
-# 简繁转换
+# 旧繁体标签的兼容（繁体选项已移除，但旧数据/后端仍可能给出这些标签）
 # ---------------------------------------------------------------------------
-class TestConvertScript:
-    def test_simplified_to_traditional(self):
-        result = L.convert_script("这是一个翻译软件", "zh-Hant")
-        assert result != "这是一个翻译软件"
-        assert "這" in result or "譯" in result
+class TestLegacyHantCompat:
+    @pytest.mark.parametrize("code", ["zh-Hant", "zh-TW", "zh_HK", "zh-MO", "zh-CHT"])
+    def test_detected_as_legacy(self, code):
+        assert L.is_legacy_hant(code)
 
-    def test_round_trip(self):
-        original = "这是一个截图翻译软件，用来识别屏幕上的文字。"
-        traditional = L.convert_script(original, "zh-Hant")
-        assert L.convert_script(traditional, "zh-Hans") == original
+    @pytest.mark.parametrize("code", ["zh-Hans", "zh-CN", "en", "ja", "auto"])
+    def test_not_legacy(self, code):
+        assert not L.is_legacy_hant(code)
 
-    def test_english_untouched(self):
-        assert L.convert_script("Hello world", "zh-Hant") == "Hello world"
+    @pytest.mark.parametrize("code", ["zh-Hant", "zh-TW", "zh-CHT"])
+    def test_normalized_to_simplified(self, code):
+        assert L.normalize_code(code) == L.ZH_HANS
 
-    def test_non_chinese_target_untouched(self):
-        text = "这是一个翻译软件"
-        assert L.convert_script(text, "en") == text
+    def test_normalize_keeps_others(self):
+        assert L.normalize_code("auto") == "auto"
+        assert L.normalize_code("en") == "en"
+        assert L.normalize_code("ja") == "ja"
 
-    def test_empty(self):
-        assert L.convert_script("", "zh-Hant") == ""
+    def test_label_of_legacy_shows_simplified(self):
+        """旧配置里的 zh-Hant 在界面上应显示为简体中文，而不是"未知语言"。"""
+        assert L.label("zh-Hant") == "简体中文"
+        assert L.label("zh-TW") == "简体中文"
 
-    def test_needs_script_conversion(self):
-        assert L.needs_script_conversion("auto", "zh-Hant")
-        assert L.needs_script_conversion("zh-Hans", "zh-Hant")
-        assert not L.needs_script_conversion("en", "zh-Hant")
-        assert not L.needs_script_conversion("auto", "en")
+    def test_no_script_conversion_anymore(self):
+        assert not L.needs_script_conversion("auto", "zh-Hans")
+        assert not L.needs_script_conversion("en", "zh-Hans")
+
+    def test_convert_script_is_gone(self):
+        """简繁转换已随繁体选项一并移除，不应再存在这个函数。"""
+        assert not hasattr(L, "convert_script")
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +133,7 @@ def test_has_cjk():
 
 def test_language_choices():
     choices = L.language_choices()
-    assert [c for c, _ in choices] == ["zh-Hans", "zh-Hant", "en"]
+    assert [c for c, _ in choices] == ["zh-Hans", "en"]
     assert L.language_choices(include_auto=True)[0][0] == "auto"
 
 
@@ -141,9 +145,15 @@ def test_info_falls_back_for_unknown_code():
     异常冒到翻译服务后被当成「后端失败」，用户看到的是「翻译经常失败」。
     现在未知代码按「未知语言」处理，翻译照常进行。
     """
-    for code in ("fr", "et", "ja", "und", "zh-Hant-TW"):
+    for code in ("fr", "et", "ja", "und"):
         assert L.info(code).code == "und", code
     assert L.info("auto").label_zh == "自动检测"
+
+
+def test_info_of_legacy_hant_is_unknown_but_label_maps_it():
+    """``info()`` 只认内部代码；旧繁体标签由 ``normalize_code`` / ``label`` 兜住。"""
+    assert L.info("zh-Hant").code == "und"
+    assert L.label("zh-Hant") == "简体中文"
 
 
 def test_label_of_unknown_code_does_not_crash():
@@ -152,5 +162,7 @@ def test_label_of_unknown_code_does_not_crash():
 
 def test_is_supported():
     assert L.is_supported("en")
+    assert L.is_supported("zh-Hans")
     assert not L.is_supported("auto")
     assert not L.is_supported("ja")
+    assert not L.is_supported("zh-Hant")

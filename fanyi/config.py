@@ -12,11 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .languages import EN, ZH_HANS, ZH_HANT
+from .languages import EN, ZH_HANS, is_legacy_hant
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.5.0"
+APP_VERSION = "0.6.0"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
@@ -28,7 +28,6 @@ DEFAULT_UI_LANGUAGE = ZH_HANS
 #: 界面语言可选项（代码, 中文名, 英文名）
 UI_LANGUAGE_CHOICES = [
     (ZH_HANS, "简体中文", "Chinese (Simplified)"),
-    (ZH_HANT, "繁体中文", "Chinese (Traditional)"),
     ("en", "英语", "English"),
 ]
 
@@ -83,8 +82,6 @@ class Config:
     # --- 语言 ---
     target_lang: str = ZH_HANS
     source_lang: str = "auto"
-    #: 显示译文时是否按目标字形做本地转换（简繁）
-    normalize_script: bool = True
 
     # --- 热键 ---
     hotkey: str = DEFAULT_HOTKEY
@@ -133,7 +130,7 @@ class Config:
     llm_timeout: float = 30.0
 
     # --- 界面 ---
-    #: 界面显示语言（zh-Hans / zh-Hant / en），与翻译的源/目标语言互不影响
+    #: 界面显示语言（zh-Hans / en），与翻译的源/目标语言互不影响
     ui_language: str = ZH_HANS
     result_always_on_top: bool = True
     result_auto_copy: bool = False
@@ -166,6 +163,13 @@ class Config:
         engines = kwargs.get("translate_engines")
         if engines and list(engines) in LEGACY_ENGINES:
             kwargs["translate_engines"] = list(DEFAULT_ENGINES)
+
+        # 繁体已移除：老配置里的 zh-Hant 全部改回简体，
+        # 否则会出现"界面语言不在可选列表里"或"目标语言不受支持"的怪状态
+        for field_name in ("target_lang", "source_lang", "ui_language"):
+            value = kwargs.get(field_name)
+            if isinstance(value, str) and is_legacy_hant(value):
+                kwargs[field_name] = ZH_HANS
         return cls(**kwargs)
 
     # ------------------------------------------------------------------

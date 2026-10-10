@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from fanyi.languages import ZH_HANS, ZH_HANT
+from fanyi.languages import ZH_HANS
 from fanyi.ui import i18n
 from fanyi.ui.i18n import ENGLISH, catalog, language_display_name, set_language, tr, trn
 
@@ -126,11 +126,10 @@ class TestLookup:
         assert tr("设置") == "Settings"
         set_language(ZH_HANS)
 
-    def test_traditional_is_generated(self):
-        set_language(ZH_HANT)
-        assert tr("设置") == "設置"
-        assert tr("快捷键") == "快捷鍵"
+    def test_simplified_is_the_default(self):
         set_language(ZH_HANS)
+        assert i18n.current_language() == ZH_HANS
+        assert catalog(ZH_HANS) == {}
 
     def test_unknown_key_falls_back_to_source(self):
         """漏翻只显示中文，不会变成看不懂的占位符。"""
@@ -166,7 +165,6 @@ class TestLookup:
 class TestLanguageNames:
     def test_names_follow_ui_language(self):
         assert language_display_name(ZH_HANS, ZH_HANS) == "简体中文"
-        assert language_display_name(ZH_HANS, ZH_HANT) == "簡體中文"
         assert language_display_name(ZH_HANS, "en") == "Chinese (Simplified)"
 
     def test_english_ui_has_no_cjk(self):
@@ -175,6 +173,13 @@ class TestLanguageNames:
             assert not any("\u4e00" <= c <= "\u9fff" for c in name), name
 
     def test_supported_languages(self):
-        assert set(i18n.UI_LANGUAGES) == {ZH_HANS, ZH_HANT, "en"}
+        assert set(i18n.UI_LANGUAGES) == {ZH_HANS, "en"}
         assert i18n.is_supported("en")
         assert not i18n.is_supported("ja")
+
+    def test_traditional_ui_language_is_gone(self):
+        """繁体界面语言已移除：既不在可选列表里，也不能被切过去。"""
+        assert "zh-Hant" not in i18n.UI_LANGUAGES
+        assert not i18n.is_supported("zh-Hant")
+        assert not set_language("zh-Hant")
+        assert i18n.current_language() == ZH_HANS

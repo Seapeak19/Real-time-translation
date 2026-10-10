@@ -80,22 +80,29 @@ def main() -> int:
     )
     check("Target:" in controller.tray.icon.toolTip(), "托盘提示已切换", controller.tray.icon.toolTip().replace("\n", " | "))
 
-    # --- 切到繁体 ---
-    window.ui_language_combo.setCurrentIndex(window.ui_language_combo.findData("zh-Hant"))
+    # --- 切回简体 ---
+    window.ui_language_combo.setCurrentIndex(window.ui_language_combo.findData("zh-Hans"))
     app.processEvents()
-    check(i18n.current_language() == "zh-Hant", "可切换到繁体中文", i18n.current_language())
+    check(i18n.current_language() == "zh-Hans", "可切回简体中文", i18n.current_language())
     sidebar = [window._sidebar.item(i).text() for i in range(window._sidebar.count())]
-    check(sidebar[1] == "快捷鍵", "侧栏已切换为繁体", str(sidebar))
+    check(sidebar[1] == "快捷键", "侧栏已切回简体", str(sidebar))
     check(
-        Config.load(config_path()).ui_language == "zh-Hant",
-        "繁体选择已落盘",
+        Config.load(config_path()).ui_language == "zh-Hans",
+        "简体选择已落盘",
+    )
+
+    # --- 繁体选项已移除：下拉里不该还有它 ---
+    check(
+        window.ui_language_combo.findData("zh-Hant") < 0,
+        "界面语言下拉已无繁体选项",
+        f"{window.ui_language_combo.count()} 项",
     )
 
     # --- 模拟"重启"：重新读配置并应用 ---
     fresh = Config.load(config_path())
-    i18n.set_language("zh-Hans")  # 先改回，验证确实是从配置里读出来的
+    i18n.set_language("en")  # 先改掉，验证确实是从配置里读出来的
     i18n.set_language(fresh.ui_language)
-    check(i18n.current_language() == "zh-Hant", "重启后按配置恢复繁体", i18n.current_language())
+    check(i18n.current_language() == "zh-Hans", "重启后按配置恢复简体", i18n.current_language())
 
     # --- 无效值兜底 ---
     bad = Config.load(config_path())
