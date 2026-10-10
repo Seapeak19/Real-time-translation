@@ -335,12 +335,43 @@ python -m fanyi --debug                   # 输出调试日志
 # 跑单元测试
 .venv\Scripts\python.exe -m pytest
 
-# 打包成单文件 exe（可选，体积约 200MB+，因为包含 ONNX 模型与 Qt）
-.venv\Scripts\pyinstaller --noconfirm --windowed --name 翻译 ^
-  --collect-all rapidocr_onnxruntime ^
-  --collect-all onnxruntime ^
-  --collect-all opencc ^
-  fanyi\__main__.py
+# 打包（会读取 翻译.spec，产出 dist\翻译\）
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean 翻译.spec
+```
+
+改动之后建议按这个顺序验证一遍，都是真的调用系统能力而不是纯逻辑测试：
+
+```powershell
+.venv\Scripts\python.exe -m pytest                      # 单元测试
+.venv\Scripts\python.exe scripts\diagnose_dpi.py        # 框选坐标是否与屏幕一致
+.venv\Scripts\python.exe scripts\gui_smoketest.py       # 界面与快捷键录制
+.venv\Scripts\python.exe scripts\launch_check.py        # 真实启动
+.venv\Scripts\python.exe scripts\verify_package.py      # 打包产物
+```
+
+---
+
+## 版本历史
+
+| 版本 | 提交 | 内容 |
+|---|---|---|
+| **v0.2.0** | `3409e9c` | 当前发布：设置主窗口（可视化录制快捷键/切换语言）、免安装打包、修复高 DPI 框选错位与多词热键失效 |
+| `v0.1.2-rc` | `32e0dd0` | 中间快照：高 DPI 坐标修复 + 设置主窗口 |
+| `v0.1.1-rc` | `ca24c8f` | 中间快照：免安装打包 + 单实例/焦点/文本拼接修复 |
+| **v0.1.0** | `6731905` | 首个可用版本：热键框选截图 + 本地离线 OCR + 可插拔翻译层 + 托盘常驻 |
+
+带 `-rc` 的是开发过程中的中间快照，用来在需要时回退比对，不是正式发布点。
+
+```powershell
+# 查看所有版本
+git tag -n1 --sort=version:refname
+
+# 回到某个版本（只读查看，看完记得切回 main）
+git checkout v0.1.0
+git switch main
+
+# 查看某个版本改了什么
+git show v0.2.0 --stat
 ```
 
 ---
