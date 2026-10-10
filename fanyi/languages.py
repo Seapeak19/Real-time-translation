@@ -92,13 +92,34 @@ def is_supported(code: str) -> bool:
 
 
 def info(code: str) -> LanguageInfo:
-    """取语言元信息，`auto` 返回自动检测项。"""
+    """取语言元信息。
+
+    对**未知代码不再抛异常**，而是退回"语言中立"的条目：
+
+    后端返回的检测语言可能超出我们支持的三种。实测 Bing 会把
+    ``Transformer``、``claude-3-5-sonnet`` 这类短词判成 ``fr``（法语）、
+    把 ``v1.2.3-beta`` 判成 ``et``（爱沙尼亚语）。之前这里直接
+    ``raise ValueError``，异常冒到翻译服务后被当成"后端失败"，
+    于是整条翻译失败并回退到下一个后端——用户看到的就是"经常翻译失败"。
+
+    现在未知代码按"未知语言"处理：既能正常翻译，也不会因为一个字
+    没识别出来就整句放弃。
+    """
     if code == AUTO:
         return AUTO_INFO
-    try:
-        return LANGUAGES[code]
-    except KeyError:  # pragma: no cover - 防御性
-        raise ValueError(f"不支持的语言代码: {code!r}") from None
+    found = LANGUAGES.get(code)
+    if found is not None:
+        return found
+    return UNKNOWN_INFO
+
+
+#: 兜底条目：调用方拿到它不会崩，只是不做字形转换、不按 CJK 断行
+UNKNOWN_INFO = LanguageInfo(
+    code="und",
+    label_zh="未知语言",
+    label_en="Unknown",
+    default="und",
+)
 
 
 def label(code: str) -> str:
@@ -130,6 +151,7 @@ _HANT_NAMES = {
     "繁体中文": "繁體中文",
     "英语": "英語",
     "自动检测": "自動偵測",
+    "未知语言": "未知語言",
 }
 
 _EN_NAMES = {
@@ -137,6 +159,7 @@ _EN_NAMES = {
     ZH_HANT: "Chinese (Traditional)",
     EN: "English",
     AUTO: "Auto detect",
+    "und": "Unknown",
 }
 
 

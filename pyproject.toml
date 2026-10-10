@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fanyi"
-version = "0.3.1"
+version = "0.4.0"
 description = "截图识别文本并翻译的 Windows 桌面工具（多语言互译）"
 readme = "README.md"
 requires-python = ">=3.10"

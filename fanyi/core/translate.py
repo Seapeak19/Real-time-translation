@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import queue
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -16,7 +18,15 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from ..config import Config, app_home
-from ..languages import AUTO, ZH_HANS, ZH_HANT, convert_script, from_provider, info
+from ..languages import (
+    AUTO,
+    EN,
+    ZH_HANS,
+    ZH_HANT,
+    convert_script,
+    from_provider,
+    info,
+)
 from .base import (
     NoEngineAvailable,
     RateLimitedError,
@@ -25,12 +35,16 @@ from .base import (
     Translator,
 )
 from .client import HttpClient
+from .detect import dominant_language
+from .llm import LlmTranslator
 from .engines import (
     BingTranslator,
     GoogleTranslator,
     MyMemoryTranslator,
     YoudaoTranslator,
 )
+
+logger = logging.getLogger(__name__)
 
 #: 后端名 → 构造函数
 ENGINE_FACTORIES: Dict[str, Callable[[HttpClient], Translator]] = {
@@ -40,17 +54,35 @@ ENGINE_FACTORIES: Dict[str, Callable[[HttpClient], Translator]] = {
     "google": GoogleTranslator,
 }
 
+#: 大模型后端的名称（构造方式与其它后端不同，单独处理）
+LLM_ENGINE = "llm"
+
+#: 免费后端的内置默认顺序（配置为空时的兜底）
+DEFAULT_ENGINE_ORDER = ("youdao", "bing", "mymemory", "google")
+
 ENGINE_LABELS: Dict[str, str] = {
     "youdao": "有道翻译",
     "mymemory": "MyMemory",
     "bing": "Bing 翻译",
     "google": "Google 免费端点",
+    LLM_ENGINE: "大模型翻译",
 }
 
 #: 触发限流后退避的秒数；期间该后端会被暂时跳过
 RATE_LIMIT_COOLDOWN = 45.0
 #: 其它失败（网络、结构变更）的冷却时间，短一些
 ERROR_COOLDOWN = 12.0
+#: 冷却上限：反复失败时按倍数递增，但不超过这个值
+MAX_COOLDOWN = 180.0
+
+#: 目标语言对应的"必须是这种文字"的判据。
+#: 用来识破"请求成功但译文原样返回"的退化输出——免费接口在短词、
+#: 产品名、代码片段上很常见（实测 MyMemory 大量回显原文）。
+_SCRIPT_PATTERNS = {
+    ZH_HANS: re.compile(r"[\u4e00-\u9fff]"),
+    ZH_HANT: re.compile(r"[\u4e00-\u9fff]"),
+    EN: re.compile(r"[A-Za-z]"),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +212,8 @@ class TranslationService:
         self._engines: Dict[str, Translator] = {}
         #: 后端名 → 解禁时间戳（单调时钟）
         self._cooldown: Dict[str, float] = {}
+        #: 后端名 → 连续失败次数（用于递增冷却时长）
+        self._strikes: Dict[str, int] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -199,18 +233,27 @@ class TranslationService:
         return remain
 
     def _mark_failure(self, name: str, exc: TranslationError) -> None:
-        """失败后让该后端短暂退避。
+        """失败后让该后端短暂退避，并记录连续失败次数。
 
         免费端点普遍限流，如果每次都从头撞一遍，用户体验会退化成"每次都要等超时"。
         退避之后，被限流的后端会被暂时跳过，直接使用可用的那个。
+
+        连续失败会**逐步拉长冷却**（45s → 90s → 180s 封顶）：
+        实测有道在连续使用后会长时间限流，固定 45 秒会导致每次冷却一结束
+        就再撞一次墙，白等一轮才降级到可用后端。
         """
-        seconds = RATE_LIMIT_COOLDOWN if isinstance(exc, RateLimitedError) else ERROR_COOLDOWN
+        base = RATE_LIMIT_COOLDOWN if isinstance(exc, RateLimitedError) else ERROR_COOLDOWN
         with self._lock:
+            strikes = self._strikes.get(name, 0) + 1
+            self._strikes[name] = strikes
+            # 第 1 次失败按基础时长，之后每多一次翻倍，封顶 MAX_COOLDOWN
+            seconds = min(base * (2 ** (strikes - 1)), MAX_COOLDOWN)
             self._cooldown[name] = time.monotonic() + seconds
 
     def _mark_success(self, name: str) -> None:
         with self._lock:
             self._cooldown.pop(name, None)
+            self._strikes.pop(name, None)
 
     def cooldowns(self) -> Dict[str, float]:
         """当前处于冷却中的后端及剩余秒数（供界面展示）。"""
@@ -228,17 +271,40 @@ class TranslationService:
     # ------------------------------------------------------------------
     def engine(self, name: str) -> Optional[Translator]:
         """惰性构造后端实例（一个实例可复用连接）。"""
+        if name in self._engines:
+            return self._engines[name]
+        if name == LLM_ENGINE:
+            # 大模型后端需要密钥等参数，不能只传 HttpClient
+            self._engines[name] = self._build_llm()
+            return self._engines[name]
         factory = ENGINE_FACTORIES.get(name)
         if factory is None:
             return None
-        if name not in self._engines:
-            self._engines[name] = factory(self.client)
+        self._engines[name] = factory(self.client)
         return self._engines[name]
+
+    def _build_llm(self) -> LlmTranslator:
+        return LlmTranslator(
+            self.client,
+            api_key=self.config.llm_api_key,
+            base_url=self.config.llm_base_url,
+            model=self.config.llm_model,
+            temperature=self.config.llm_temperature,
+            timeout=self.config.llm_timeout,
+        )
 
     def engine_names(self) -> List[str]:
         """按配置返回实际会尝试的后端顺序（过滤掉未知项）。"""
-        names = [n for n in self.config.translate_engines if n in ENGINE_FACTORIES]
-        return names or ["youdao", "mymemory", "bing"]
+        known = set(ENGINE_FACTORIES) | {LLM_ENGINE}
+        names = [n for n in self.config.translate_engines if n in known]
+        if names:
+            return names
+        # 配置为空或全是未知项时退回内置默认顺序，
+        # 但只在配了大模型密钥时才带上它，避免无谓的失败重试
+        fallback = list(DEFAULT_ENGINE_ORDER)
+        if self.config.llm_api_key.strip():
+            fallback.insert(0, LLM_ENGINE)
+        return fallback
 
     def available_engines(self) -> List[str]:
         out = []
@@ -271,6 +337,16 @@ class TranslationService:
 
         if not text:
             return TranslateResult(text="", provider="none", source_lang=source, target_lang=target)
+
+        # 源语言为"自动检测"时，先用书写系统判一次，别让后端去猜：
+        # 实测短词（Transformer / Sam Altman）交给 Bing 会被判成法语，
+        # 于是译出"变形""十四行诗"这类离谱结果。
+        if source == AUTO:
+            guessed = dominant_language(text)
+            if guessed is not None:
+                source = guessed
+                logger.debug("按书写系统判定源语言为 %s", source)
+
         if source != AUTO and source == target:
             return TranslateResult(text=text, provider="none", source_lang=source, target_lang=target)
 
@@ -290,6 +366,8 @@ class TranslationService:
         errors: Dict[str, str] = {}
         skipped: Dict[str, str] = {}
         attempts: List[str] = []
+        #: 未能通过"像不像译文"校验的结果，留作兜底（可能来自多个后端）
+        fallback: List[TranslateResult] = []
 
         candidates: List[str] = []
         for name in self.engine_names():
@@ -308,7 +386,7 @@ class TranslationService:
         if self.config.race_engines and len(candidates) > 1:
             result = self._race(candidates, text, source, target, errors, attempts, on_attempt)
             if result is not None:
-                return self._finish(result, key, target, attempts)
+                return self._finish(result, key, target, attempts, source)
 
         for name in candidates:
             translator = self.engine(name)
@@ -325,12 +403,27 @@ class TranslationService:
                 continue
             except Exception as exc:  # 第三方库抛出的意外异常也不能中断整体流程
                 errors[name] = f"{type(exc).__name__}: {exc}"
-                with self._lock:
-                    self._cooldown[name] = time.monotonic() + ERROR_COOLDOWN
+                self._mark_failure(name, TranslationError(str(exc)))
+                continue
+
+            if not self._looks_translated(result.text, target, text):
+                # 拿到的是"原样返回"（短词、产品名、代码片段上很常见）。
+                # 记下来当兜底，然后继续问下一个后端——实测 MyMemory 会回显原文，
+                # 而 Bing 能把同一句真正翻译出来。
+                errors[name] = "返回内容未翻译"
+                self._mark_failure(name, TranslationError("返回内容未翻译"))
+                fallback.append(result)
                 continue
 
             self._mark_success(name)
-            return self._finish(result, key, target, attempts)
+            return self._finish(result, key, target, attempts, source)
+
+        if fallback:
+            # 所有后端都没给出像样的译文：返回其中最长的一条，
+            # 至少比报错好——用户还能看到内容，也能看出是哪个后端给的。
+            best = max(fallback, key=lambda item: len(item.text or ""))
+            self._mark_success(best.provider)
+            return self._finish(best, key, target, attempts, source)
 
         problems = dict(errors)
         problems.update({k: f"冷却中（{v}）" for k, v in skipped.items()})
@@ -430,15 +523,44 @@ class TranslationService:
             return result
 
     # ------------------------------------------------------------------
+    def _looks_translated(self, output: str, target: str, source: str) -> bool:
+        """粗判译文是否真的翻译了，用来识破"原样返回"。
+
+        判据是**输出里出现了目标语言的文字**：目标中文要有汉字，目标英文要有
+        拉丁字母。这里只看输出、不看输入：
+
+        早先的版本还会检查"原文里有没有目标语言的文字"，想放行 ``v1.2.3``
+        这类没什么可翻的输入。但那个判断会把 ``LLM``、``Sam Altman`` 一起
+        放行——它们字母很少、同样"没有汉字"，而它们恰恰是需要翻译的。实测
+        回显正是发生在这些短词上，所以判据必须落在输出侧。
+
+        代价是 ``v1.2.3`` 这类纯符号输入会被判为"未翻译"，从而多试一个后端。
+        这是可接受的：多花一次请求，好过把真该翻译的短词当成翻译成功。
+        """
+        output = (output or "").strip()
+        if not output:
+            return False
+
+        pattern = _SCRIPT_PATTERNS.get(target)
+        if pattern is None:
+            return True
+        return bool(pattern.search(output))
+
+    # ------------------------------------------------------------------
     def _finish(
         self,
         result: TranslateResult,
         key: str,
         target: str,
         attempts: List[str],
+        source: str = AUTO,
     ) -> TranslateResult:
-        """归一化结果并写缓存（串行与竞速两条路径共用）。"""
-        normalized = self._normalize(result, target, attempts)
+        """归一化结果并写缓存（串行与竞速两条路径共用）。
+
+        ``source`` 是实际发给后端的源语言，透传给 :meth:`_normalize`
+        以避免被后端错误的检测结果覆盖。
+        """
+        normalized = self._normalize(result, target, attempts, source)
         if self.config.cache_enabled:
             self.cache.put(
                 key,
@@ -452,11 +574,24 @@ class TranslationService:
 
     # ------------------------------------------------------------------
     def _normalize(
-        self, result: TranslateResult, target: str, attempts: List[str]
+        self,
+        result: TranslateResult,
+        target: str,
+        attempts: List[str],
+        requested_source: str = AUTO,
     ) -> TranslateResult:
-        """统一源语言代码，并把中文译文/原文归一到用户要求的字形。"""
+        """统一源语言代码，并把中文译文/原文归一到用户要求的字形。
+
+        ``requested_source`` 是我们**实际发给后端**的源语言。只要它不是
+        ``auto``，就以它为准，不采信后端回传的检测结果——实测 Bing 会把
+        ``Transformer`` 判成法语、``v1.2.3-beta`` 判成爱沙尼亚语，
+        采信它会让界面显示错误的语言，也掩盖了我们已经判对的事实。
+        """
         provider = result.provider
-        source = from_provider(result.source_lang) or AUTO
+        if requested_source != AUTO:
+            source = requested_source
+        else:
+            source = from_provider(result.source_lang) or AUTO
         text = result.text or ""
 
         # 后端只区分 zh-CN/zh-TW，字形是否一致取决于它自己；

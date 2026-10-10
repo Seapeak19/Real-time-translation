@@ -133,10 +133,21 @@ def test_language_choices():
     assert L.language_choices(include_auto=True)[0][0] == "auto"
 
 
-def test_info_rejects_unknown():
-    with pytest.raises(ValueError):
-        L.info("fr")
+def test_info_falls_back_for_unknown_code():
+    """回归：未知语言代码不能抛异常。
+
+    Bing 会把 ``Transformer``、``claude-3-5-sonnet`` 这类短词检测成 ``fr``、
+    把 ``v1.2.3-beta`` 检测成 ``et``。早期实现让 ``info()`` 抛 ValueError，
+    异常冒到翻译服务后被当成「后端失败」，用户看到的是「翻译经常失败」。
+    现在未知代码按「未知语言」处理，翻译照常进行。
+    """
+    for code in ("fr", "et", "ja", "und", "zh-Hant-TW"):
+        assert L.info(code).code == "und", code
     assert L.info("auto").label_zh == "自动检测"
+
+
+def test_label_of_unknown_code_does_not_crash():
+    assert L.label("fr") == "未知语言"
 
 
 def test_is_supported():

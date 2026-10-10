@@ -16,7 +16,7 @@ from .languages import EN, ZH_HANS, ZH_HANT
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.4.0"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
@@ -117,6 +117,17 @@ class Config:
     request_timeout: float = 8.0
     max_chars_per_request: int = 1800
     cache_enabled: bool = True
+
+    # --- 大模型后端（可选，译文质量最高）---
+    #: 留空表示不启用该后端；填写后可在后端列表里选用它
+    llm_api_key: str = ""
+    #: OpenAI 兼容接口地址；也可直接填完整的 /chat/completions 地址
+    llm_base_url: str = "https://api.deepseek.com/v1"
+    llm_model: str = "deepseek-chat"
+    #: 翻译不需要随机性，温度调低输出更稳定
+    llm_temperature: float = 0.2
+    #: 大模型响应比机器翻译慢，超时留宽一些
+    llm_timeout: float = 30.0
 
     # --- 界面 ---
     #: 界面显示语言（zh-Hans / zh-Hant / en），与翻译的源/目标语言互不影响

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -119,10 +120,21 @@ _OCR_KEYS = (("rapidocr", "RapidOCR（本地离线，中简/中繁/英）"),)
 
 #: 翻译后端列表项（代码, 翻译键），顺序会被用户调整，这里只定义可选集合
 _ENGINE_KEYS = (
+    ("llm", "大模型翻译（需 API Key，译文质量最好）"),
     ("youdao", "有道翻译（最快，无需 Key）"),
     ("mymemory", "MyMemory（免费额度，较稳定）"),
     ("bing", "Bing 翻译（无需 Key，需先取令牌）"),
     ("google", "Google 免费端点（部分网络不可达）"),
+)
+
+#: 大模型服务的常见接口地址，供下拉快速选择。
+#: 第一项是**服务商自己的名字**（产品名），有意不参与多语言化：
+#: 品牌名在任何界面语言下都应保持原样，翻译反而会让人认不出来。
+_LLM_PRESETS = (  # noqa: i18n
+    ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
+    ("硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
+    ("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
+    ("本地 Ollama", "http://localhost:11434/v1", "qwen2.5"),
 )
 
 
@@ -690,19 +702,115 @@ class MainWindow(QDialog):
         cache_row.addStretch(1)
         layout.addLayout(cache_row)
 
+        llm_box = self._build_llm_group()
+
         return self._page(
             box,
+            llm_box,
             _tip(
                 tr(
-                    "所有后端都是免费公开接口，不需要 API Key。\n"
-                    "被限流的后端会自动进入冷却（默认 45 秒）并切换到下一个，\n"
+                    "上面四个后端都是免费公开接口，不需要 API Key。\n"
+                    "被限流的后端会自动进入冷却并切换到下一个，\n"
                     "因此把响应快的排在上面体验最好。\n"
-                    "想测自己网络下哪个最快：运行 scripts\\probe_engines.py。"
+                    "想测自己网络下哪个最快：运行 scripts\\benchmark_translate.py。\n"
+                    "如果觉得译文不够准（尤其是 AI 术语、人名），"
+                    "建议在下面配置大模型后端——它最准，但需要 API Key 且按量计费。"
                 )
             ),
             title=tr("翻译"),
-            desc=tr("译文由在线免费接口生成。任何一个后端不可用都不会让翻译整个失败。"),
+            desc=tr(
+                "译文由在线接口生成。任何一个后端不可用都不会让翻译整个失败。"
+                "勾选并拖动可调整优先级。"
+            ),
         )
+
+    # ------------------------------------------------------------------
+    def _build_llm_group(self) -> QGroupBox:
+        """大模型翻译后端的设置区。
+
+        这是唯一需要 API Key 的后端，因此单独成组并给出获取途径，
+        避免和上面"全免费"的后端混在一起让人以为要付费才能用。
+        """
+        box = QGroupBox(tr("大模型翻译（可选，译文质量最好）"))
+        box.setProperty("_i18n", "大模型翻译（可选，译文质量最好）")
+        layout = QVBoxLayout(box)
+
+        self.llm_preset_combo = QComboBox()
+        self.llm_preset_combo.setProperty("_i18n", "服务商")
+        for name, base_url, model in _LLM_PRESETS:
+            self.llm_preset_combo.addItem(name, (base_url, model))
+        self.llm_preset_combo.addItem(tr("自定义"), None)
+        self.llm_preset_combo.currentIndexChanged.connect(self._on_llm_preset)
+        layout.addLayout(_row(tr("服务商"), self.llm_preset_combo, tr("选择后会自动填好下面的接口地址与模型名")))
+
+        self.llm_key_edit = QLineEdit(self.config.llm_api_key or "")
+        self.llm_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.llm_key_edit.setPlaceholderText(tr("粘贴你的 API Key，留空则不启用"))
+        self.llm_key_edit.textChanged.connect(self._emit_translate)
+        layout.addLayout(_row(tr("API Key"), self.llm_key_edit, tr("只保存在本机配置里，不会上传到别处")))
+
+        self.llm_base_edit = QLineEdit(self.config.llm_base_url or "")
+        self.llm_base_edit.setPlaceholderText("https://api.deepseek.com/v1")
+        self.llm_base_edit.textChanged.connect(self._emit_translate)
+        layout.addLayout(
+            _row(tr("接口地址"), self.llm_base_edit, tr("OpenAI 兼容地址，本地模型也可填"))
+        )
+
+        self.llm_model_edit = QLineEdit(self.config.llm_model or "")
+        self.llm_model_edit.setPlaceholderText("deepseek-chat")
+        self.llm_model_edit.textChanged.connect(self._emit_translate)
+        layout.addLayout(_row(tr("模型名"), self.llm_model_edit, tr("例如 deepseek-chat")))
+
+        self.llm_status = QLabel("")
+        self.llm_status.setObjectName("PageDesc")
+        self.llm_status.setWordWrap(True)
+        layout.addWidget(self.llm_status)
+
+        self._sync_llm_preset()
+        self._refresh_llm_status()
+        return box
+
+    def _on_llm_preset(self, index: int) -> None:
+        preset = self.llm_preset_combo.itemData(index)
+        if preset is None:
+            return
+        base_url, model = preset
+        self.llm_base_edit.setText(base_url)
+        self.llm_model_edit.setText(model)
+
+    def _sync_llm_preset(self) -> None:
+        """按键值把"服务商"下拉对到当前配置；对不上就选"自定义"。"""
+        base = (self.config.llm_base_url or "").strip().rstrip("/")
+        model = (self.config.llm_model or "").strip()
+        for index, (_name, url, preset_model) in enumerate(_LLM_PRESETS):
+            if url.rstrip("/") == base and preset_model == model:
+                self.llm_preset_combo.blockSignals(True)
+                self.llm_preset_combo.setCurrentIndex(index)
+                self.llm_preset_combo.blockSignals(False)
+                return
+        self.llm_preset_combo.blockSignals(True)
+        self.llm_preset_combo.setCurrentIndex(self.llm_preset_combo.count() - 1)
+        self.llm_preset_combo.blockSignals(False)
+
+    def _checked_engines(self) -> List[str]:
+        """按列表当前顺序返回被勾选的后端代码。"""
+        engines: List[str] = []
+        for row in range(self.engine_list.count()):
+            item = self.engine_list.item(row)
+            if item is not None and item.checkState() == Qt.CheckState.Checked:
+                engines.append(str(item.data(Qt.ItemDataRole.UserRole)))
+        return engines
+
+    def _refresh_llm_status(self) -> None:
+        """提示当前大模型后端是否可用，以及它排在第几位。"""
+        has_key = bool((self.llm_key_edit.text() or "").strip())
+        checked = "llm" in self._checked_engines()
+        if not has_key:
+            self.llm_status.setText(tr("未填写 API Key：大模型后端不会参与翻译。"))
+        elif not checked:
+            self.llm_status.setText(tr("已填写 API Key，但未在上面的列表里勾选「大模型翻译」。"))
+        else:
+            self.llm_status.setText(tr("已启用：翻译时会按列表顺序尝试它。"))
 
     def _move_engine(self, delta: int) -> None:
         row = self.engine_list.currentRow()
@@ -717,6 +825,10 @@ class MainWindow(QDialog):
         self._emit_translate()
 
     def _emit_translate(self) -> None:
+        # 后端勾选/密钥变化都会影响"大模型是否启用"的提示，顺手刷新
+        refresh = getattr(self, "_refresh_llm_status", None)
+        if refresh is not None and hasattr(self, "llm_status"):
+            refresh()
         self.translate_changed.emit()
 
     # ------------------------------------------------------------------
@@ -850,15 +962,14 @@ class MainWindow(QDialog):
         config.ocr_scale = float(self.ocr_scale_spin.value())
         config.ocr_min_confidence = float(self.ocr_confidence_spin.value())
 
-        engines: List[str] = []
-        for row in range(self.engine_list.count()):
-            item = self.engine_list.item(row)
-            if item.checkState() == Qt.CheckState.Checked:
-                engines.append(str(item.data(Qt.ItemDataRole.UserRole)))
+        engines: List[str] = self._checked_engines()
         if engines:
             config.translate_engines = engines
         config.request_timeout = float(self.timeout_spin.value())
         config.cache_enabled = self.cache_check.isChecked()
+        config.llm_api_key = self.llm_key_edit.text().strip()
+        config.llm_base_url = self.llm_base_edit.text().strip()
+        config.llm_model = self.llm_model_edit.text().strip()
 
         config.result_always_on_top = self.on_top_check.isChecked()
         config.show_original = self.show_original_check.isChecked()
@@ -884,6 +995,11 @@ class MainWindow(QDialog):
         self.auto_copy_check.setChecked(config.result_auto_copy)
         self.font_spin.setValue(int(config.result_font_size))
         self.history_spin.setValue(int(config.history_limit))
+        self.llm_key_edit.setText(config.llm_api_key or "")
+        self.llm_base_edit.setText(config.llm_base_url or "")
+        self.llm_model_edit.setText(config.llm_model or "")
+        self._sync_llm_preset()
+        self._refresh_llm_status()
         self.refresh_status()
 
     # ------------------------------------------------------------------

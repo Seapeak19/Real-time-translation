@@ -90,6 +90,18 @@ def audit(path: Path) -> list:
 
     problems = []
 
+    # 预先建立"字符串 → 所属顶层赋值语句"的映射，
+    # 用于支持把 noqa: i18n 写在多行常量表的第一行
+    owner_assignments: dict = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if value is None:
+                continue
+            for child in ast.walk(value):
+                if isinstance(child, ast.Constant) and isinstance(child.value, str):
+                    owner_assignments.setdefault(id(child), []).append(node)
+
     # 1) 未包裹的普通字符串
     source_lines = source.splitlines()
     for node in ast.walk(tree):
@@ -101,14 +113,23 @@ def audit(path: Path) -> list:
             continue
         if is_stylesheet(node.value):
             continue
-        # 带 noqa: i18n 的行表示有意不翻译（例如托盘图标上的标识字）
-        line = source_lines[node.lineno - 1] if node.lineno <= len(source_lines) else ""
-        if "noqa: i18n" in line:
-            continue
-        segment = ast.get_source_segment(source, node)
-        if segment and ("tr(" in segment or "trn(" in segment):
-            continue
-        problems.append((node.lineno, "未包裹", node.value))
+        # 带 noqa: i18n 的行表示有意不翻译（例如托盘图标上的标识字）。
+        # 常量表常常写成多行元组，标记留在第一行，因此这里按**语句**判断：
+        # 只要该字符串所属的顶层赋值语句的起始行带标记，整块都视为有意保留。
+        for owner in owner_assignments.get(id(node), ()):
+            owner_line = (
+                source_lines[owner.lineno - 1] if owner.lineno <= len(source_lines) else ""
+            )
+            if "noqa: i18n" in owner_line:
+                break
+        else:
+            line = source_lines[node.lineno - 1] if node.lineno <= len(source_lines) else ""
+            if "noqa: i18n" in line:
+                continue
+            segment = ast.get_source_segment(source, node)
+            if segment and ("tr(" in segment or "trn(" in segment):
+                continue
+            problems.append((node.lineno, "未包裹", node.value))
 
     # 2) f-string 里的中文（需要人工改成 trn）
     for node in ast.walk(tree):

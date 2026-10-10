@@ -346,7 +346,15 @@ def main() -> int:
     check(settings.source_combo.count() == 4, "源语言可选项（含自动检测）")
     check(settings.capture_hotkey.display.text() == "Ctrl + Alt + Z", "快捷键以可读形式展示",
           settings.capture_hotkey.display.text())
-    check(settings.engine_list.count() == 4, "翻译后端可选项")
+    # 断言"列表项数 == 可选后端数"，而不是写死数字：
+    # 每加一个后端（例如大模型）都要改测试的话，测试就失去意义了
+    from fanyi.ui.main_window import _ENGINE_KEYS
+
+    check(
+        settings.engine_list.count() == len(_ENGINE_KEYS),
+        "翻译后端可选项",
+        f"{settings.engine_list.count()} 项（可选 {len(_ENGINE_KEYS)} 个）",
+    )
     settings.show()
     app.processEvents()
     check(settings.isVisible(), "设置窗口可以显示")

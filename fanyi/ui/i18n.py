@@ -237,15 +237,28 @@ ENGLISH: Dict[str, str] = {
         "Enable translation cache (identical text is not requested again)"
     ),
     "清空翻译缓存": "Clear translation cache",
-    "所有后端都是免费公开接口，不需要 API Key。\n"
-    "被限流的后端会自动进入冷却（默认 45 秒）并切换到下一个，\n"
+    "上面四个后端都是免费公开接口，不需要 API Key。\n"
+    "被限流的后端会自动进入冷却并切换到下一个，\n"
     "因此把响应快的排在上面体验最好。\n"
-    "想测自己网络下哪个最快：运行 scripts\\probe_engines.py。": (
-        "All backends are free public endpoints and need no API key.\n"
-        "A rate-limited backend is cooled down automatically (45 seconds by default) "
-        "and the next one takes over,\n"
+    "想测自己网络下哪个最快：运行 scripts\\benchmark_translate.py。\n"
+    "如果觉得译文不够准（尤其是 AI 术语、人名），"
+    "建议在下面配置大模型后端——它最准，但需要 API Key 且按量计费。": (
+        "The four backends above are free public endpoints and need no API key.\n"
+        "A rate-limited backend is cooled down automatically and the next one takes over,\n"
         "so putting the fastest one on top gives the best experience.\n"
-        "To measure which is fastest on your network, run scripts\\probe_engines.py."
+        "To measure which is fastest on your network, run "
+        "scripts\\benchmark_translate.py.\n"
+        "If the translations are not accurate enough (especially AI terms and personal "
+        "names), configure the LLM backend below — it is the most accurate, but it needs "
+        "an API key and is billed by usage."
+    ),
+    "译文由在线接口生成。任何一个后端不可用都不会让翻译整个失败。"
+    "勾选并拖动可调整优先级。": (
+        "Translations come from online endpoints. No single backend being unavailable "
+        "will fail the whole translation. Tick and drag to change priority."
+    ),
+    "大模型翻译（需 API Key，译文质量最好）": (
+        "LLM translation (needs an API key, best quality)"
     ),
     "有道翻译（最快，无需 Key）": "Youdao (fastest, no key needed)",
     "MyMemory（免费额度，较稳定）": "MyMemory (free quota, fairly stable)",
@@ -253,10 +266,39 @@ ENGLISH: Dict[str, str] = {
     "Google 免费端点（部分网络不可达）": (
         "Google free endpoint (unreachable on some networks)"
     ),
+    "大模型翻译（可选，译文质量最好）": (
+        "LLM translation (optional, best quality)"
+    ),
+    "服务商": "Provider",
+    "自定义": "Custom",
+    "选择后会自动填好下面的接口地址与模型名": (
+        "Selecting one fills in the endpoint and model below"
+    ),
+    "API Key": "API key",
+    "粘贴你的 API Key，留空则不启用": "Paste your API key; leave empty to disable",
+    "只保存在本机配置里，不会上传到别处": (
+        "Stored only in the local config, never uploaded anywhere"
+    ),
+    "接口地址": "Endpoint URL",
+    "OpenAI 兼容地址，本地模型也可填": (
+        "Any OpenAI-compatible URL; a local model works too"
+    ),
+    "模型名": "Model name",
+    "例如 deepseek-chat": "For example deepseek-chat",
+    "未填写 API Key：大模型后端不会参与翻译。": (
+        "No API key entered: the LLM backend will not be used."
+    ),
+    "已填写 API Key，但未在上面的列表里勾选「大模型翻译」。": (
+        "An API key is entered, but \"LLM translation\" is not ticked in the list above."
+    ),
+    "已启用：翻译时会按列表顺序尝试它。": (
+        "Enabled: it will be tried in the order shown in the list."
+    ),
     "有道翻译": "Youdao",
     "MyMemory": "MyMemory",
     "Bing 翻译": "Bing Translate",
     "Google 免费端点": "Google free endpoint",
+    "大模型翻译": "LLM translation",
 
     # ===== 界面页 =====
     "调整结果窗口的显示方式与本地数据规模。": (

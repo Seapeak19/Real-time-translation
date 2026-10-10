@@ -127,6 +127,9 @@ class _StubTranslator:
             outcome = outcome(self.calls)
         if isinstance(outcome, Exception):
             raise outcome
+        # 允许行为直接给一个 TranslateResult，便于测"后端报了奇怪的语言代码"这类情况
+        if isinstance(outcome, TranslateResult):
+            return outcome
         return TranslateResult(text=outcome, provider=self.name, source_lang="en", target_lang=target)
 
 
