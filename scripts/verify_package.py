@@ -22,6 +22,14 @@ ROOT = Path(__file__).resolve().parent.parent
 APP_HOME = Path(os.environ.get("APPDATA", Path.home())) / "fanyi"
 LOG = APP_HOME / "fanyi.log"
 
+# 版本号从代码里读，避免每次发版都要手改这个脚本
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+try:
+    from fanyi.config import APP_TITLE, APP_VERSION as EXPECTED_VERSION
+except Exception:  # pragma: no cover - 只在源码结构异常时发生
+    APP_TITLE, EXPECTED_VERSION = "翻译", ""
+
 failures: list = []
 
 
@@ -101,7 +109,9 @@ def main() -> int:
         new_log = log_since(before)
 
         check(alive, "exe 启动后保持常驻（托盘程序不应自己退出）")
-        check("翻译 0.1.0 启动" in new_log, "写入启动日志")
+        # 版本号从源码读取，发版后不用再改这里
+        started_line = f"{APP_TITLE} {EXPECTED_VERSION} 启动" if EXPECTED_VERSION else "启动，日志:"
+        check(started_line in new_log, "写入启动日志", _line_with(new_log, "启动，日志:"))
         check("全局热键已生效" in new_log, "注册全局热键", _line_with(new_log, "全局热键"))
         check("应用已启动" in new_log, "控制器完成装配")
         check("RapidOCR 模型加载完成" in new_log, "OCR 模型在打包环境中加载成功", _line_with(new_log, "RapidOCR"))
