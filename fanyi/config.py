@@ -16,7 +16,7 @@ from .languages import EN, ZH_HANS
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
