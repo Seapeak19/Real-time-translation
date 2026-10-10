@@ -18,7 +18,7 @@ datas = []
 binaries = []
 hiddenimports = []
 
-for package in ("rapidocr_onnxruntime", "onnxruntime", "opencc"):
+for package in ("rapidocr_onnxruntime", "onnxruntime"):
     try:
         package_datas, package_binaries, package_hidden = collect_all(package)
     except Exception as exc:

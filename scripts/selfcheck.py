@@ -47,7 +47,8 @@ def check_imports() -> None:
         ("numpy", "numpy"),
         ("onnxruntime", "onnxruntime"),
         ("rapidocr-onnxruntime", "rapidocr_onnxruntime"),
-        ("opencc", "opencc"),
+        ("Pillow", "PIL"),
+        ("keyboard", "keyboard"),
     ]:
         try:
             __import__(module)
