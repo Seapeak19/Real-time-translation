@@ -131,7 +131,7 @@ _ENGINE_KEYS = (
 #: 第一项是**服务商自己的名字**（产品名），有意不参与多语言化：
 #: 品牌名在任何界面语言下都应保持原样，翻译反而会让人认不出来。
 _LLM_PRESETS = (  # noqa: i18n
-    ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat"),
+    ("DeepSeek", "https://api.deepseek.com/v1", "deepseek-flash"),
     ("硅基流动 SiliconFlow", "https://api.siliconflow.cn/v1", "Qwen/Qwen2.5-7B-Instruct"),
     ("OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"),
     ("本地 Ollama", "http://localhost:11434/v1", "qwen2.5"),
@@ -757,9 +757,9 @@ class MainWindow(QDialog):
         )
 
         self.llm_model_edit = QLineEdit(self.config.llm_model or "")
-        self.llm_model_edit.setPlaceholderText("deepseek-chat")
+        self.llm_model_edit.setPlaceholderText("deepseek-flash")
         self.llm_model_edit.textChanged.connect(self._emit_translate)
-        layout.addLayout(_row(tr("模型名"), self.llm_model_edit, tr("例如 deepseek-chat")))
+        layout.addLayout(_row(tr("模型名"), self.llm_model_edit, tr("例如 deepseek-flash")))
 
         self.llm_status = QLabel("")
         self.llm_status.setObjectName("PageDesc")

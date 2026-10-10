@@ -16,7 +16,7 @@ from .languages import EN, ZH_HANS, ZH_HANT
 
 APP_NAME = "fanyi"
 APP_TITLE = "翻译"
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 #: 允许的热键修饰键写法（用户输入会被规范化）
 DEFAULT_HOTKEY = "ctrl+alt+z"
@@ -123,7 +123,10 @@ class Config:
     llm_api_key: str = ""
     #: OpenAI 兼容接口地址；也可直接填完整的 /chat/completions 地址
     llm_base_url: str = "https://api.deepseek.com/v1"
-    llm_model: str = "deepseek-chat"
+    #: 模型名。这里写 DeepSeek **当前在售**的名字：``deepseek-chat`` 这类旧名
+    #: 已被官方标记停用（请求会被转到 deepseek-flash 并按其价格计费），
+    #: 为避免哪天旧名彻底失效，默认值直接用实际模型名。
+    llm_model: str = "deepseek-flash"
     #: 翻译不需要随机性，温度调低输出更稳定
     llm_temperature: float = 0.2
     #: 大模型响应比机器翻译慢，超时留宽一些

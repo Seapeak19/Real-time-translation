@@ -284,7 +284,7 @@ ENGLISH: Dict[str, str] = {
         "Any OpenAI-compatible URL; a local model works too"
     ),
     "模型名": "Model name",
-    "例如 deepseek-chat": "For example deepseek-chat",
+    "例如 deepseek-flash": "For example deepseek-flash",
     "未填写 API Key：大模型后端不会参与翻译。": (
         "No API key entered: the LLM backend will not be used."
     ),
