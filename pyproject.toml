@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fanyi"
-version = "0.1.0"
+version = "0.2.0"
 description = "截图识别文本并翻译的 Windows 桌面工具（多语言互译）"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-authors = [{ name = "翻译" }]
+authors = [{ name = "Seapeak", email = "3521361484@qq.com" }]
 keywords = ["screenshot", "ocr", "translate", "pyside6", "windows"]
 classifiers = [
     "Environment :: Win32 (MS Windows)",
