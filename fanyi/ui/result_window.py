@@ -76,6 +76,8 @@ class ResultWindow(QWidget):
     retranslate_requested = Signal()
     #: 用户切换目标语言（参数为新的语言代码）
     target_changed = Signal(str)
+    #: 用户点击"设置"，请求打开设置窗口
+    settings_requested = Signal()
     #: 窗口尺寸变化（便于持久化）
     resized = Signal(QSize)
 
@@ -237,6 +239,11 @@ class ResultWindow(QWidget):
         self.pin_button.setToolTip("切换窗口置顶")
         self.pin_button.clicked.connect(self.set_pinned)
         layout.addWidget(self.pin_button)
+
+        self.settings_button = QPushButton("设置")
+        self.settings_button.setToolTip("打开设置：快捷键、语言、OCR 与翻译后端")
+        self.settings_button.clicked.connect(self.settings_requested.emit)
+        layout.addWidget(self.settings_button)
 
         close_button = QPushButton("✕")
         close_button.setObjectName("CloseButton")

@@ -64,7 +64,13 @@ class Selection:
 
 
 def normalize_rect(a: Tuple[int, int], b: Tuple[int, int]) -> Tuple[int, int, int, int]:
-    """由两个角点得到规范化的 ``(x, y, w, h)``，w/h 最小为 0。"""
+    """由两个角点得到规范化的 ``(x, y, w, h)``。
+
+    区间语义是**半开**的（``w = right - left``），与 ``range()`` 一致。
+    单元格坐标是"闭"的，转换时请自行 +1，例如把 ``QRect`` 的闭区间
+    边界转成半开区间。两者混用会稳定地少 1 像素——拖满全屏也选不到
+    最右一列和最下一行。
+    """
     left, right = sorted((int(a[0]), int(b[0])))
     top, bottom = sorted((int(a[1]), int(b[1])))
     return left, top, max(0, right - left), max(0, bottom - top)
@@ -160,7 +166,7 @@ class SelectionOverlay(QWidget):
         )
 
     def _widget_rect(self) -> QRect:
-        """当前选区在窗口中的矩形。"""
+        """当前选区在窗口中的矩形（``QRect`` 语义：right/bottom 为闭区间）。"""
         if self._origin is None or self._current is None:
             return QRect()
         x, y, w, h = normalize_rect(
@@ -173,8 +179,15 @@ class SelectionOverlay(QWidget):
         rect = self._widget_rect()
         if rect.isNull():
             return None
+
+        # QRect 的 right()/bottom() 是**闭区间**（等于 x+w-1），
+        # 而 normalize_rect 用的是半开区间，所以右下角要 +1 才等价。
+        # 少了这个 +1，每次框选都会稳定地少 1 像素，拖满全屏也选不到
+        # 最右一列和最下一行。
         top_left = self._to_virtual(rect.topLeft())
-        bottom_right = self._to_virtual(rect.bottomRight())
+        bottom_right = self._to_virtual(
+            QPoint(rect.x() + rect.width() + 1, rect.y() + rect.height() + 1)
+        )
         x, y, w, h = normalize_rect(
             (top_left.x(), top_left.y()), (bottom_right.x(), bottom_right.y())
         )
@@ -461,6 +474,12 @@ class OverlayManager:
         :param nudge_foreground: 是否调用 Win32 把本进程提到前台。
             由全局热键触发时应当为 ``True``：Windows 会拦截后台进程的
             ``SetForegroundWindow``，而热键线程刚被系统唤醒，此时调用才有效。
+
+        坐标说明：应用启动时已关闭 Qt 的高 DPI 自动缩放（见 ``fanyi.app``），
+        因此 ``QScreen.geometry()`` 与 GDI 抓屏位图**同处设备像素坐标系**，
+        这里可以直接使用，不能再乘以 ``devicePixelRatio()``——
+        早期版本乘了一次，在 125% 缩放下窗口被算成 1.25 倍大小，
+        这是"屏幕比例变了、边缘截不到"的直接原因。
         """
         self.close()
         screens = QGuiApplication.screens()
@@ -469,15 +488,13 @@ class OverlayManager:
 
         for screen in screens:
             geometry = screen.geometry()
-            # QScreen.geometry() 可能是逻辑像素；这里统一换算成物理像素
-            ratio = float(screen.devicePixelRatio() or 1.0)
-            physical = (
-                int(round(geometry.x() * ratio)),
-                int(round(geometry.y() * ratio)),
-                int(round(geometry.width() * ratio)),
-                int(round(geometry.height() * ratio)),
+            device = (
+                int(geometry.x()),
+                int(geometry.y()),
+                int(geometry.width()),
+                int(geometry.height()),
             )
-            overlay = SelectionOverlay(capture, physical)
+            overlay = SelectionOverlay(capture, device)
             overlay.region_selected.connect(on_selected)
             overlay.cancelled.connect(on_cancelled)
             self._overlays.append(overlay)

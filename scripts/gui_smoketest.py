@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -25,6 +26,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+# 与 fanyi/app.py 保持一致：Qt 的高 DPI 自动缩放必须关掉，
+# 否则测试跑在"逻辑像素"坐标系里，与真实程序的设备像素坐标系不一致。
+os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
 failures: list = []
 
@@ -321,7 +326,102 @@ def main() -> int:
 
     check(runner.wait(2000), "wait() 能等到任务结束")
 
-    # --- 9. 控制器装配（不启动事件循环，只验证对象能构造与互连） ---
+    # --- 9. 设置主窗口 ---
+    from PySide6.QtGui import QKeyEvent
+    from PySide6.QtCore import QEvent
+
+    from fanyi.ui.hotkey_edit import HotkeyEdit, qt_sequence_to_combo
+    from fanyi.ui.main_window import MainWindow
+
+    settings = MainWindow(Config())
+    check(settings._stack.count() == 5, "设置窗口有 5 个页面")
+    check(settings._sidebar.count() == 5, "侧栏导航项齐全",
+          str([settings._sidebar.item(i).text() for i in range(settings._sidebar.count())]))
+    check(settings.target_combo.count() == 3, "目标语言可选项")
+    check(settings.source_combo.count() == 4, "源语言可选项（含自动检测）")
+    check(settings.capture_hotkey.display.text() == "Ctrl + Alt + Z", "快捷键以可读形式展示",
+          settings.capture_hotkey.display.text())
+    check(settings.engine_list.count() == 4, "翻译后端可选项")
+    settings.show()
+    app.processEvents()
+    check(settings.isVisible(), "设置窗口可以显示")
+
+    # 语言：切换目标语言应发出信号
+    language_signals = []
+    settings.languages_changed.connect(lambda: language_signals.append(True))
+    settings._set_target("en")
+    app.processEvents()
+    check(language_signals, "切换目标语言发出 languages_changed")
+    check(settings.collect().target_lang == "en", "collect() 读回新目标语言")
+
+    # 语言：互换按钮
+    settings.source_combo.setCurrentIndex(settings.source_combo.findData("zh-Hans"))
+    settings._set_target("en")
+    settings._on_swap()
+    check(
+        settings.source_combo.currentData() == "en" and settings.target_combo.currentData() == "zh-Hans",
+        "互换源/目标语言",
+        f"源={settings.source_combo.currentData()} 目标={settings.target_combo.currentData()}",
+    )
+
+    # 快捷键录制：核心行为验证
+    record_events = []
+    settings.recording_changed.connect(record_events.append)
+    hotkey_events = []
+    settings.hotkeys_changed.connect(lambda: hotkey_events.append(True))
+
+    settings.capture_hotkey.record_button.setChecked(True)
+    app.processEvents()
+    check(settings.capture_hotkey.recording, "点击录制后进入录制状态")
+    check(record_events and record_events[-1] is True, "录制开始发出 recording_changed(True)",
+          str(record_events))
+
+    def press(widget, key, modifiers):
+        widget.keyPressEvent(
+            QKeyEvent(QEvent.Type.KeyPress, key, modifiers)
+        )
+
+    mods = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
+    press(settings.capture_hotkey, Qt.Key.Key_F, mods)
+    app.processEvents()
+    check(settings.capture_hotkey.hotkey == "ctrl+shift+f", "录入 Ctrl+Shift+F",
+          settings.capture_hotkey.hotkey)
+    check(not settings.capture_hotkey.recording, "录入成功后自动退出录制状态")
+    check(record_events[-1] is False, "录制结束发出 recording_changed(False)", str(record_events))
+    check(hotkey_events, "录入成功后发出 hotkeys_changed")
+
+    # 没有修饰键的组合必须被拒绝
+    settings.capture_hotkey.record_button.setChecked(True)
+    press(settings.capture_hotkey, Qt.Key.Key_K, Qt.KeyboardModifier.NoModifier)
+    app.processEvents()
+    check(settings.capture_hotkey.hotkey == "ctrl+shift+f", "拒绝无修饰键的按键",
+          f"hotkey={settings.capture_hotkey.hotkey} 提示={settings.capture_hotkey.hint.text()}")
+    check(bool(settings.capture_hotkey.hint.text()), "拒绝时给出提示文案")
+    settings.capture_hotkey.stop_recording()
+
+    # Esc 取消录制
+    settings.capture_hotkey.record_button.setChecked(True)
+    press(settings.capture_hotkey, Qt.Key.Key_Escape, Qt.KeyboardModifier.NoModifier)
+    app.processEvents()
+    check(not settings.capture_hotkey.recording, "Esc 取消录制")
+    check(settings.capture_hotkey.hotkey == "ctrl+shift+f", "Esc 不修改已有快捷键")
+
+    # 「默认」按钮恢复出厂值
+    settings.capture_hotkey.reset_button.click()
+    check(settings.capture_hotkey.hotkey == "ctrl+alt+z", "「默认」恢复出厂快捷键",
+          settings.capture_hotkey.hotkey)
+
+    # 状态栏应反映当前设置
+    settings.set_hotkey_status(["ctrl+alt+z"], "")
+    check("截图热键" in settings.status_label.text(), "状态栏显示热键状态",
+          settings.status_label.text())
+    settings.set_hotkey_status([], "被其它程序占用")
+    check("未生效" in settings.status_label.text(), "热键失败时状态栏给出警告",
+          settings.status_label.text())
+
+    settings.deleteLater()
+
+    # --- 10. 控制器装配（不启动事件循环，只验证对象能构造与互连） ---
     from fanyi.ui.controller import AppController
 
     controller = AppController(Config())
@@ -329,6 +429,35 @@ def main() -> int:
     controller.set_target_language("en")
     check(controller.config.target_lang == "en", "控制器切换目标语言")
     check(controller.translation.engine_names()[0] == "youdao", "默认首选后端", controller.translation.engine_names()[0])
+
+    # 控制器 ↔ 设置窗口：打开、录制时临时解绑热键、关闭后恢复
+    controller.open_settings()
+    app.processEvents()
+    main_window = controller._main_window
+    check(main_window is not None and main_window.isVisible(), "控制器能打开设置窗口")
+
+    if main_window is not None:
+        # 语言改动经控制器落到配置
+        main_window._set_target("zh-Hant")
+        app.processEvents()
+        check(controller.config.target_lang == "zh-Hant", "设置窗口改语言后配置已更新",
+              controller.config.target_lang)
+        main_window._set_target("zh-Hans")
+
+        # 录制期间必须停用全局热键，否则按键会被钩子截走、界面录不到
+        controller._on_recording_changed(True)
+        check(controller._hotkeys_suspended, "录制时标记为已暂停")
+        check(not controller.hotkeys.installed, "录制时全局热键已解绑")
+        controller._on_recording_changed(False)
+        check(not controller._hotkeys_suspended, "录制结束后恢复")
+        controller._sync_hotkey_status()
+        check("截图热键" in main_window.status_label.text() or "未生效" in main_window.status_label.text(),
+              "状态栏已同步热键状态", main_window.status_label.text())
+
+        main_window.close()
+        app.processEvents()
+        check(not main_window.isVisible(), "关闭设置窗口只是隐藏（不退出程序）")
+
     controller.result_window.hide()
     controller.tray.hide()
     controller.pipeline.close()

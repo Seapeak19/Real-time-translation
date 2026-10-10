@@ -44,7 +44,7 @@ _ALLOWED_KEYS = {
     "space", "enter", "return", "tab", "esc", "escape", "backspace",
     "insert", "delete", "home", "end", "page up", "page down",
     "up", "down", "left", "right",
-    "print screen", "scroll lock", "pause",
+    "print screen", "scroll lock", "pause", "caps lock",
     "`", "-", "=", "[", "]", "\\", ";", "'", ",", ".", "/",
 }
 _ALLOWED_KEYS |= {f"f{i}" for i in range(1, 25)}
@@ -54,13 +54,17 @@ def normalize_hotkey(combo: str) -> str:
     """把用户输入的热键写法规范化成 ``ctrl+alt+z``。
 
     支持 ``Ctrl+Alt+Z``、``ctrl-alt-z``、``ctrl + alt + z`` 等写法。
+
+    注意：**不能简单地把所有空格都删掉**。像 ``page up`` / ``page down`` /
+    ``print screen`` / ``caps lock`` 这些键名本身含空格，是 keyboard 库要求的
+    写法；删掉空格会变成它不认识的 ``pageup``，注册时静默失败。
+    因此这里只按分隔符切分，再逐段去掉首尾空白。
     """
     if not combo:
         return ""
-    raw = combo.strip().lower().replace(" ", "")
-    for sep in ("-", "_", "+"):
-        raw = raw.replace(sep, "+") if sep != "+" else raw
-    parts = [p for p in raw.split("+") if p]
+    raw = combo.strip().lower().replace("_", "+").replace("-", "+")
+    parts = [p.strip() for p in raw.split("+")]
+    parts = [p for p in parts if p]
     if not parts:
         return ""
 
@@ -72,7 +76,7 @@ def normalize_hotkey(combo: str) -> str:
             if canonical not in modifiers:
                 modifiers.append(canonical)
         else:
-            keys.append(part)
+            keys.append(" ".join(part.split()))  # 压缩段内多余空白，但保留词间空格
 
     if not keys:
         return ""
@@ -100,13 +104,18 @@ def is_valid_hotkey(combo: str) -> bool:
 
 
 def format_hotkey(combo: str) -> str:
-    """把规范化的热键转成好看的展示形式：``Ctrl + Alt + Z``。"""
+    """把规范化的热键转成好看的展示形式：``Ctrl + Alt + Z``、``Ctrl + Alt + Page Up``。"""
     normalized = normalize_hotkey(combo)
     if not normalized:
         return "未设置"
     parts = normalized.split("+")
     pretty = [_DISPLAY_NAMES.get(p, p.upper()) for p in parts[:-1]]
-    pretty.append(parts[-1].upper() if len(parts[-1]) == 1 else parts[-1].title())
+    key = parts[-1]
+    if len(key) == 1:
+        pretty.append(key.upper())
+    else:
+        # 多词键名（page up / print screen）每个词首字母大写
+        pretty.append(" ".join(word.capitalize() for word in key.split()))
     return " + ".join(pretty)
 
 

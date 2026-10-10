@@ -26,6 +26,7 @@ from ..overlay import OverlayManager, Selection, nudge_to_foreground
 from ..screenshot import Capture, crop, grab_virtual_desktop, to_numpy
 from .history import HistoryEntry, HistoryStore
 from .history_panel import HistoryPanel
+from .main_window import MainWindow
 from .result_window import ResultWindow
 from .settings_dialog import SettingsDialog
 from .tray import TrayIcon
@@ -62,6 +63,9 @@ class AppController(QObject):
         self._last_source_text = ""
         self._settings_window: Optional[SettingsDialog] = None
         self._history_window: Optional[HistoryPanel] = None
+        self._main_window: Optional[MainWindow] = None
+        self._hotkeys_suspended = False
+        self._hotkey_error = ""
 
         # --- 核心能力 ---
         self.translation = TranslationService(config)
@@ -79,6 +83,7 @@ class AppController(QObject):
         self.result_window.set_show_original(config.show_original)
         self.result_window.retranslate_requested.connect(self.retranslate_current)
         self.result_window.target_changed.connect(self.set_target_language)
+        self.result_window.settings_requested.connect(self.open_settings)
 
         self.tray = TrayIcon(config)
         self.tray.capture_requested.connect(self.request_capture)
@@ -111,14 +116,19 @@ class AppController(QObject):
 
     def _register_hotkeys(self) -> None:
         if not self.config.hotkey_enabled:
+            self._hotkey_error = ""
             self.tray.refresh_tooltip()
             return
         ok = self.hotkeys.install(self.config.hotkey, self.config.repeat_hotkey)
         self.tray.refresh_tooltip()
         if ok:
+            self._hotkey_error = ""
+            from ..hotkey import format_hotkey
+
             self.tray.notify(
                 APP_TITLE,
-                f"已在后台运行，按 {self.hotkeys.hotkeys.get('capture', '')} 开始截图翻译。",
+                "已在后台运行，按 "
+                f"{format_hotkey(self.hotkeys.hotkeys.get('capture', ''))} 开始截图翻译。",
                 3000,
             )
 
@@ -342,7 +352,153 @@ class AppController(QObject):
         self.result_window.set_languages(code, self.config.target_lang)
         self._save_config()
 
+    # ------------------------------------------------------------------
+    # 设置界面
+    # ------------------------------------------------------------------
     def open_settings(self) -> None:
+        """打开主设置窗口（语言、快捷键、OCR、翻译、界面）。"""
+        if self._main_window is None:
+            window = MainWindow(self.config)
+            window.languages_changed.connect(self._on_main_languages_changed)
+            window.hotkeys_changed.connect(self._on_main_hotkeys_changed)
+            window.ocr_changed.connect(self._on_main_ocr_changed)
+            window.translate_changed.connect(self._on_main_translate_changed)
+            window.appearance_changed.connect(self._on_main_appearance_changed)
+            window.capture_requested.connect(self.request_capture)
+            window.cache_clear_requested.connect(self.clear_cache)
+            window.history_requested.connect(self.open_history)
+            window.open_config_dir_requested.connect(self.open_config_dir)
+            window.reapply_hotkeys_requested.connect(self._on_reapply_hotkeys)
+            window.recording_changed.connect(self._on_recording_changed)
+            self._main_window = window
+
+        self._main_window.reload_from(self.config)
+        self._main_window.show()
+        self._main_window.raise_()
+        self._main_window.activateWindow()
+        if not self.config.first_run_done:
+            self.config.first_run_done = True
+            self._save_config()
+
+    def open_config_dir(self) -> None:
+        """在资源管理器里打开配置目录，便于用户备份或排查。"""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        target = app_home()
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+            self.tray.notify(APP_TITLE, f"配置目录：{target}", 6000)
+
+    def _apply_settings(self, notify: bool = True) -> None:
+        """把主窗口里的设置写回配置、落盘并生效。"""
+        window = self._main_window
+        if window is None:
+            return
+
+        before = (
+            self.config.target_lang,
+            self.config.source_lang,
+            self.config.hotkey,
+            self.config.repeat_hotkey,
+            self.config.hotkey_enabled,
+            tuple(self.config.translate_engines or []),
+            self.config.request_timeout,
+            self.config.ocr_scale,
+            self.config.ocr_min_confidence,
+        )
+        config = window.collect()
+        after = (
+            config.target_lang,
+            config.source_lang,
+            config.hotkey,
+            config.repeat_hotkey,
+            config.hotkey_enabled,
+            tuple(config.translate_engines or []),
+            config.request_timeout,
+            config.ocr_scale,
+            config.ocr_min_confidence,
+        )
+
+        self._save_config()
+        self.tray.set_target(config.target_lang)
+        self.tray.set_source(config.source_lang)
+        self.tray.refresh_tooltip()
+
+        self.result_window.set_languages(config.source_lang, config.target_lang)
+        self.result_window.set_pinned(config.result_always_on_top)
+        self.result_window.set_show_original(config.show_original)
+        self.result_window.set_font_size(config.result_font_size)
+        self.history.set_limit(config.history_limit)
+
+        # 后端顺序 / 超时变了才重建翻译服务，避免每次改字号都重连
+        if before[5:8] != after[5:8]:
+            self.translation.close()
+            self.translation = TranslationService(config)
+            self.pipeline.translation = self.translation
+
+        # 热键相关变了才重新注册，避免打断正在进行的录制
+        if before[2:5] != after[2:5] and not self._hotkeys_suspended:
+            self._register_hotkeys()
+            self._sync_hotkey_status()
+
+        if notify:
+            self.tray.notify(APP_TITLE, "设置已保存并生效。", 1500)
+
+    # --- 主窗口各分组的变化处理 ---
+    def _on_main_languages_changed(self) -> None:
+        window = self._main_window
+        if window is None:
+            return
+        old_target = self.config.target_lang
+        self._apply_settings(notify=False)
+
+        if self.config.target_lang != old_target and self.result_window.current_texts()[0].strip():
+            # 目标语言变了，已有译文按新语言重译一次，省得手动点
+            self.retranslate_current()
+        window.refresh_status()
+
+    def _on_main_hotkeys_changed(self) -> None:
+        self._apply_settings(notify=False)
+
+    def _on_main_ocr_changed(self) -> None:
+        self._apply_settings(notify=False)
+
+    def _on_main_translate_changed(self) -> None:
+        self._apply_settings(notify=False)
+
+    def _on_main_appearance_changed(self) -> None:
+        self._apply_settings(notify=False)
+
+    def _on_reapply_hotkeys(self) -> None:
+        self._register_hotkeys()
+        self._sync_hotkey_status()
+        if self._main_window is not None:
+            if self._hotkey_error:
+                self.tray.notify(APP_TITLE, f"热键注册失败：{self._hotkey_error}", 5000)
+            else:
+                self.tray.notify(APP_TITLE, "快捷键已重新注册。", 2000)
+
+    def _sync_hotkey_status(self) -> None:
+        if self._main_window is None:
+            return
+        registered: list = []
+        if self.hotkeys.installed:
+            mapping = self.hotkeys.hotkeys
+            if mapping.get("capture"):
+                registered.append(mapping["capture"])
+            if mapping.get("repeat"):
+                registered.append(mapping["repeat"])
+        self._main_window.set_hotkey_status(registered, self._hotkey_error)
+
+    def _on_recording_changed(self, recording: bool) -> None:
+        """快捷键录制开始/结束时临时停用/恢复全局热键。"""
+        if recording:
+            self._suspend_hotkeys()
+        else:
+            self._resume_hotkeys()
+
+    # --- 旧版设置对话框（保留兼容） ---
+    def open_settings_dialog(self) -> None:
         if self._settings_window is None:
             self._settings_window = SettingsDialog(self.config)
             self._settings_window.config_saved.connect(self._on_settings_saved)
@@ -368,6 +524,7 @@ class AppController(QObject):
         self.pipeline.translation = self.translation
 
         self._register_hotkeys()
+        self._sync_hotkey_status()
         self.tray.notify(APP_TITLE, "设置已保存。", 2000)
 
     def _save_config(self) -> None:
@@ -423,7 +580,32 @@ class AppController(QObject):
         return self._run(image, anchor=anchor)
 
     def _on_hotkey_error(self, message: str) -> None:
+        self._hotkey_error = message
+        self._sync_hotkey_status()
         self.tray.notify("热键注册失败", message, 6000)
+
+    # ------------------------------------------------------------------
+    # 录制快捷键时临时停用全局热键
+    # ------------------------------------------------------------------
+    def _suspend_hotkeys(self) -> None:
+        """录制新快捷键前必须停用全局热键。
+
+        否则用户按下的组合会被键盘钩子先截走并触发截图翻译，
+        界面上根本录不到任何东西——这是热键类工具最常见的坑。
+        """
+        if self._hotkeys_suspended:
+            return
+        self._hotkeys_suspended = True
+        self.hotkeys.uninstall()
+        logger.debug("录制快捷键：已临时停用全局热键")
+
+    def _resume_hotkeys(self) -> None:
+        if not self._hotkeys_suspended:
+            return
+        self._hotkeys_suspended = False
+        self._register_hotkeys()
+        self._sync_hotkey_status()
+        logger.debug("录制结束：已恢复全局热键 %s", self.hotkeys.hotkeys)
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:

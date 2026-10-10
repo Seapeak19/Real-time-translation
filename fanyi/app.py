@@ -12,9 +12,25 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
+
+# ---------------------------------------------------------------------------
+# 必须在导入 PySide6 之前设置：让 Qt 与 GDI 统一使用设备像素
+#
+# 背景：本项目用 Windows GDI 抓屏（天生是设备/物理像素），而 Qt 默认会按
+# 显示器缩放把坐标换算成"逻辑像素"。两者混用的后果是：
+#   2560×1440 @125% 的屏幕，Qt 报告 2048×1152 + DPR 1.25，
+#   覆盖层按逻辑像素铺开就会和实际屏幕对不上，边缘区域框选不到，
+#   用户看到的现象正是"调出截图后屏幕比例变了，有些地方截不到"。
+#
+# 关掉 Qt 的自动缩放后，geometry() 与抓屏位图同处设备像素坐标，
+# 覆盖层可以严丝合缝铺满每个显示器。代价是不跟随系统缩放，
+# 但本工具界面元素很少（托盘 + 结果窗 + 设置窗），可以接受。
+# ---------------------------------------------------------------------------
+os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "0")
 
 from .config import APP_NAME, APP_TITLE, APP_VERSION, Config, app_home, config_path
 

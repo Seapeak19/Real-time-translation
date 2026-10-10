@@ -146,11 +146,27 @@ class TestHotkeyNormalization:
         assert normalize_hotkey("ctrl+ctrl+alt+z") == "ctrl+alt+z"
 
     @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            # 回归：这些键名本身含空格，是 keyboard 库要求的写法。
+            # 早期实现把所有空格都删掉，得到 pageup，注册时静默失败。
+            ("ctrl+alt+page up", "ctrl+alt+page up"),
+            ("Ctrl + Alt + Page Up", "ctrl+alt+page up"),
+            ("ctrl+alt+print screen", "ctrl+alt+print screen"),
+            ("ctrl + alt +  caps lock ", "ctrl+alt+caps lock"),
+        ],
+    )
+    def test_multiword_keys_keep_their_space(self, raw, expected):
+        assert normalize_hotkey(raw) == expected
+
+    @pytest.mark.parametrize(
         "combo,expected",
         [
             ("ctrl+alt+z", True),
             ("ctrl+shift+f2", True),
             ("ctrl+alt+space", True),
+            ("ctrl+alt+page up", True),
+            ("ctrl+alt+print screen", True),
             ("z", False),
             ("ctrl", False),
             ("", False),
@@ -164,6 +180,7 @@ class TestHotkeyNormalization:
         assert format_hotkey("ctrl+alt+z") == "Ctrl + Alt + Z"
         assert format_hotkey("ctrl+shift+f2") == "Ctrl + Shift + F2"
         assert format_hotkey("windows+alt+q") == "Win + Alt + Q"
+        assert format_hotkey("ctrl+alt+page up") == "Ctrl + Alt + Page Up"
         assert format_hotkey("") == "未设置"
 
 
