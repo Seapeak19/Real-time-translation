@@ -514,30 +514,48 @@ class BingTranslator(Translator):
         raise last_error or EngineError("Bing 请求失败")
 
     @staticmethod
-    def _parse(text: str) -> Dict[str, Any]:
-        """Bing 可能返回 JSON，也可能是 HTML 转义后的 JSON。"""
+    def _parse(text: str) -> Any:
+        """解析 Bing 的返回，兼容多种形状。
+
+        实测见过的形式：
+
+        * ``[{"translations": [...]}]`` —— ``www.bing.com`` 当前返回的**顶层数组**
+        * ``{"data": {"translations": [...]}}`` —— ``cn.bing.com`` 的形式
+        * 上面两种被 HTML 转义或 ``\\"`` 转义后的文本
+
+        早期实现只接受 dict，于是把顶层数组判成"无法解析"。
+        这个 bug 只在**非英语源语言**上暴露（日/韩/俄 → 中文），
+        因为那些请求返回数组，而英译中当时返回的是对象——
+        所以它藏了很久才被 `scripts/probe_language_support.py` 翻出来。
+        """
         body = (text or "").strip()
         if not body:
             raise EngineError("Bing 返回内容为空")
-        if body.startswith("{"):
+
+        # 直接可解析的情况（对象或数组都接受）
+        if body[0] in "{[":
             try:
                 data = json.loads(body)
             except ValueError:
                 data = None
-            if isinstance(data, dict):
+            if isinstance(data, (dict, list)):
                 return data
+
+        # 被 HTML 转义 / 反斜杠转义的情况：截出 JSON 片段再解析
         unescaped = html.unescape(body)
         for candidate in (unescaped, body.replace('\\"', '"')):
-            start = candidate.find('{"data"')
-            if start < 0:
-                start = candidate.find("{")
-            end = candidate.rfind("}")
-            if start >= 0 and end > start:
+            for opener, closer in (('{"data"', "}"), ("{", "}"), ("[", "]")):
+                start = candidate.find(opener)
+                if start < 0:
+                    continue
+                end = candidate.rfind(closer)
+                if end <= start:
+                    continue
                 try:
                     data = json.loads(candidate[start : end + 1])
                 except ValueError:
                     continue
-                if isinstance(data, dict):
+                if isinstance(data, (dict, list)):
                     return data
         raise EngineError(f"Bing 返回内容无法解析: {body[:120]}")
 

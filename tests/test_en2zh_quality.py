@@ -1,14 +1,17 @@
-"""「英译中质量」相关修复的回归测试。
+"""翻译质量相关修复的回归测试。
 
-守住三个实测得出、容易回退的行为：
+守住几项实测得出、容易回退的行为：
 
 1. 未知语言代码不能让翻译失败（Bing 会把短词判成 fr/et）；
 2. 源语言为 auto 时应先按书写系统判断，不交给后端猜；
-3. "请求成功但原样返回"的结果要被识别出来，并继续尝试其它后端。
+3. "请求成功但原样返回"的结果要被识别出来，并继续尝试其它后端；
+4. Bing 的返回可能是 JSON 对象**或顶层数组**，两种都要能解析
+   （早期只认对象，导致非英语源语言全部失败）。
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -31,6 +34,56 @@ def _service(behaviors: dict, engines: list, **config_kwargs) -> TranslationServ
     stubs = {name: _StubTranslator(name, behavior) for name, behavior in behaviors.items()}
     service.engine = lambda name, _stubs=stubs: _stubs.get(name)  # type: ignore[assignment]
     return service
+
+
+# ---------------------------------------------------------------------------
+# Bing 返回形状（回归：顶层数组曾被判为"无法解析"）
+# ---------------------------------------------------------------------------
+class TestBingResponseShapes:
+    def test_top_level_array(self):
+        """www.bing.com 返回顶层数组；早期实现只认 dict，把可用结果判成失败。
+
+        这个 bug 只在非英语源语言上暴露（日/韩/俄 → 中文返回数组，
+        而英译中当时返回对象），因此藏了很久。
+        """
+        from fanyi.core.engines import BingTranslator
+
+        payload = [
+            {
+                "translations": [{"text": "大型语言模型有时会产生幻觉。", "to": "zh-Hans"}],
+                "usedLLM": True,
+                "detectedLanguage": {"language": "ja"},
+            }
+        ]
+        parsed = BingTranslator._parse(json.dumps(payload, ensure_ascii=False))
+        assert isinstance(parsed, list)
+        text, lang = BingTranslator._parse_translation(parsed)
+        assert text == "大型语言模型有时会产生幻觉。"
+        assert lang == "ja"
+
+    def test_object_with_data_wrapper(self):
+        from fanyi.core.engines import BingTranslator
+
+        payload = {"data": {"translations": [{"text": "你好"}]}}
+        parsed = BingTranslator._parse(json.dumps(payload))
+        assert BingTranslator._parse_translation(parsed)[0] == "你好"
+
+    def test_escaped_json_still_parsed(self):
+        """被反斜杠转义过的返回也要能解析出来。"""
+        from fanyi.core.engines import BingTranslator
+
+        raw = '[{\\"translations\\":[{\\"text\\":\\"你好\\"}]}]'
+        parsed = BingTranslator._parse(raw)
+        assert BingTranslator._parse_translation(parsed)[0] == "你好"
+
+    def test_empty_and_garbage_rejected(self):
+        from fanyi.core.engines import BingTranslator
+        from fanyi.core.base import TranslationError
+
+        with pytest.raises(TranslationError):
+            BingTranslator._parse("")
+        with pytest.raises(TranslationError):
+            BingTranslator._parse("<html>not json</html>")
 
 
 # ---------------------------------------------------------------------------
